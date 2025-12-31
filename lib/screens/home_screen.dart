@@ -5,6 +5,7 @@ import '../core/constants/app_constants.dart';
 import '../core/constants/app_routes.dart';
 import '../core/services/auth_service.dart';
 import '../widgets/layout/app_drawer.dart';
+import 'vente/vente_screen.dart';
 
 /// Écran principal de l'application
 ///
@@ -108,7 +109,7 @@ class _HomeScreenState extends State<HomeScreen> {
       case 'dashboard':
         return _buildDashboard();
       case 'vente':
-        return _buildPlaceholder('Module Vente', Icons.point_of_sale);
+        return const VenteScreen(); // ← Maintenant fonctionnel
       case 'produits':
         return _buildPlaceholder('Module Produits', Icons.inventory);
       case 'stock':

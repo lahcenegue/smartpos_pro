@@ -5,6 +5,7 @@ import 'ligne_vente.dart';
 /// Modèle pour une vente complète
 class Vente {
   final int? id;
+  final String typeDocument; // 'ticket' ou 'facture'
   final String numeroFacture;
   final String? numeroTicket;
   final int? clientId;
@@ -34,6 +35,7 @@ class Vente {
 
   Vente({
     this.id,
+    this.typeDocument = 'ticket',
     required this.numeroFacture,
     this.numeroTicket,
     this.clientId,
@@ -66,11 +68,15 @@ class Vente {
   Map<String, dynamic> toMap() {
     return {
       'id': id,
-      'numero_facture': numeroFacture,
+      'numero_facture':
+          numeroFacture.isNotEmpty
+              ? numeroFacture
+              : 'TKT-${DateTime.now().millisecondsSinceEpoch}',
       'numero_ticket': numeroTicket,
-      'client_id': clientId,
+      'type_document': typeDocument.isNotEmpty ? typeDocument : 'ticket',
+      'client_id': clientId, // Peut être NULL
       'utilisateur_id': utilisateurId,
-      'session_caisse_id': sessionCaisseId,
+      'session_caisse_id': sessionCaisseId, // Peut être NULL
       'montant_ht': montantHT,
       'montant_tva': montantTVA,
       'montant_ttc': montantTTC,
@@ -98,6 +104,7 @@ class Vente {
   factory Vente.fromMap(Map<String, dynamic> map, {List<LigneVente>? lignes}) {
     return Vente(
       id: map['id'],
+      typeDocument: map['type_document'] ?? 'ticket',
       numeroFacture: map['numero_facture'],
       numeroTicket: map['numero_ticket'],
       clientId: map['client_id'],
@@ -136,6 +143,7 @@ class Vente {
     required int utilisateurId,
     required String modePaiement,
     required double montantPaye,
+    String? numeroFacture, // ← AJOUTER ce paramètre
     int? clientId,
     int? sessionCaisseId,
     double remiseGlobale = 0,
@@ -163,7 +171,7 @@ class Vente {
     double valeurPoints = Helpers.calculerValeurPoints(pointsUtilises);
     if (valeurPoints > 0) {
       totalTTC -= valeurPoints;
-      totalTTC = totalTTC < 0 ? 0 : totalTTC; // Ne pas être négatif
+      totalTTC = totalTTC < 0 ? 0 : totalTTC;
     }
 
     // Arrondir les totaux
@@ -177,11 +185,9 @@ class Vente {
     // Calculer le rendu monnaie
     double montantRendu = montantPaye > totalTTC ? montantPaye - totalTTC : 0;
 
-    // Générer le numéro de facture
-    String numeroFacture = Helpers.generateNumeroFacture();
-
     return Vente(
-      numeroFacture: numeroFacture,
+      numeroFacture:
+          numeroFacture ?? '', // ← Utiliser le numéro passé en paramètre
       clientId: clientId,
       utilisateurId: utilisateurId,
       sessionCaisseId: sessionCaisseId,
@@ -199,6 +205,12 @@ class Vente {
   }
 
   /// Getters calculés
+
+  /// Vérifier si c'est un ticket
+  bool get estTicket => typeDocument == 'ticket';
+
+  /// Vérifier si c'est une facture
+  bool get estFacture => typeDocument == 'facture';
 
   /// Nombre d'articles
   int get nombreArticles =>
@@ -228,6 +240,7 @@ class Vente {
   /// CopyWith pour immutabilité
   Vente copyWith({
     int? id,
+    String? typeDocument,
     String? numeroFacture,
     String? numeroTicket,
     int? clientId,
@@ -257,6 +270,7 @@ class Vente {
   }) {
     return Vente(
       id: id ?? this.id,
+      typeDocument: typeDocument ?? this.typeDocument,
       numeroFacture: numeroFacture ?? this.numeroFacture,
       numeroTicket: numeroTicket ?? this.numeroTicket,
       clientId: clientId ?? this.clientId,

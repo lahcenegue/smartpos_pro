@@ -41,6 +41,9 @@ dependencies:
   sqflite_common_ffi: ^2.3.6
   path: ^1.9.1
   path_provider: ^2.1.5
+  provider: ^6.1.5+1
+  pdf: ^3.11.3
+  printing: ^5.14.2
 
 dev_dependencies:
   flutter_test:

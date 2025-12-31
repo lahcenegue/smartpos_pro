@@ -30,6 +30,16 @@ class Helpers {
     return 'FAC-$date-$time';
   }
 
+  /// Générer un numéro de ticket unique (format: TKT-YYYYMMDD-HHMMSS)
+  static String generateNumeroTicket() {
+    final now = DateTime.now();
+    final date =
+        '${now.year}${now.month.toString().padLeft(2, '0')}${now.day.toString().padLeft(2, '0')}';
+    final time =
+        '${now.hour.toString().padLeft(2, '0')}${now.minute.toString().padLeft(2, '0')}${now.second.toString().padLeft(2, '0')}';
+    return 'TKT-$date-$time';
+  }
+
   /// Hasher un code PIN avec SHA-256
   static String hashPIN(String pin) {
     final bytes = utf8.encode(pin);

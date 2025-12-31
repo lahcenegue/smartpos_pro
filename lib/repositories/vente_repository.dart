@@ -12,10 +12,48 @@ class VenteRepository {
     try {
       final db = await _db.database;
 
+      // 🔍 DEBUG : Vérifier que l'utilisateur existe
+      final userCheck = await db.query(
+        'utilisateurs',
+        where: 'id = ?',
+        whereArgs: [vente.utilisateurId],
+      );
+
+      if (userCheck.isEmpty) {
+        throw AppDatabaseException(
+          'Utilisateur ID ${vente.utilisateurId} n\'existe pas !',
+        );
+      }
+
+      // 🔍 DEBUG : Si client, vérifier qu'il existe
+      if (vente.clientId != null) {
+        final clientCheck = await db.query(
+          'clients',
+          where: 'id = ?',
+          whereArgs: [vente.clientId],
+        );
+
+        if (clientCheck.isEmpty) {
+          throw AppDatabaseException(
+            'Client ID ${vente.clientId} n\'existe pas !',
+          );
+        }
+      }
+
+      print('=== DEBUG REPOSITORY ===');
+      print('Utilisateur vérifié: ${vente.utilisateurId}');
+      print('Client vérifié: ${vente.clientId}');
+      print('Numero facture: ${vente.numeroFacture}');
+      print('Type document: ${vente.typeDocument}');
+      print('Map vente: ${vente.toMap()}');
+      print('========================');
+
       // Utiliser une transaction pour garantir l'intégrité
       return await db.transaction((txn) async {
         // Insérer la vente
         final venteId = await txn.insert('ventes', vente.toMap());
+
+        print('Vente insérée avec ID: $venteId');
 
         // Insérer toutes les lignes de vente
         for (var ligne in vente.lignes) {
@@ -33,6 +71,9 @@ class VenteRepository {
         return venteId;
       });
     } catch (e) {
+      print('=== ERREUR REPOSITORY ===');
+      print(e);
+      print('=========================');
       throw AppDatabaseException('Erreur lors de la création de la vente: $e');
     }
   }
@@ -83,14 +124,41 @@ class VenteRepository {
     );
   }
 
-  /// READ - Récupérer toutes les ventes
+  /// READ - Toutes les ventes (avec limite)
   Future<List<Vente>> getToutesVentes({int? limit}) async {
     try {
       final db = await _db.database;
+
       final List<Map<String, dynamic>> maps = await db.query(
         'ventes',
         orderBy: 'date_vente DESC',
         limit: limit,
+      );
+
+      List<Vente> ventes = [];
+      for (var map in maps) {
+        final lignes = await getLignesVente(map['id']);
+        ventes.add(Vente.fromMap(map, lignes: lignes));
+      }
+
+      return ventes;
+    } catch (e) {
+      throw AppDatabaseException(
+        'Erreur lors de la récupération des ventes: $e',
+      );
+    }
+  }
+
+  /// READ - Ventes par période
+  Future<List<Vente>> getVentesParPeriode(DateTime debut, DateTime fin) async {
+    try {
+      final db = await _db.database;
+
+      final List<Map<String, dynamic>> maps = await db.query(
+        'ventes',
+        where: 'date_vente BETWEEN ? AND ?',
+        whereArgs: [debut.toIso8601String(), fin.toIso8601String()],
+        orderBy: 'date_vente DESC',
       );
 
       List<Vente> ventes = [];
@@ -238,10 +306,11 @@ class VenteRepository {
     return await getVentesByPeriode(debut: debut, fin: fin);
   }
 
-  /// READ - Récupérer les ventes en attente
+  /// READ - Ventes en attente
   Future<List<Vente>> getVentesEnAttente() async {
     try {
       final db = await _db.database;
+
       final List<Map<String, dynamic>> maps = await db.query(
         'ventes',
         where: 'statut = ?',
@@ -249,6 +318,7 @@ class VenteRepository {
         orderBy: 'date_vente DESC',
       );
 
+      // Charger chaque vente avec ses lignes
       List<Vente> ventes = [];
       for (var map in maps) {
         final lignes = await getLignesVente(map['id']);
@@ -338,12 +408,55 @@ class VenteRepository {
     }
   }
 
-  /// DELETE - Supprimer une vente (et ses lignes via CASCADE)
+  /// DELETE - Supprimer une vente (avec ses lignes)
   Future<int> supprimerVente(int id) async {
     try {
       final db = await _db.database;
-      return await db.delete('ventes', where: 'id = ?', whereArgs: [id]);
+
+      print('🗑️ Début suppression vente $id...');
+
+      // Étape 1 : Compter les lignes à supprimer
+      final countResult = await db.rawQuery(
+        'SELECT COUNT(*) as count FROM lignes_vente WHERE vente_id = ?',
+        [id],
+      );
+      final nbLignes = countResult.first['count'] as int;
+      print('📋 $nbLignes ligne(s) à supprimer');
+
+      // Étape 2 : Supprimer les lignes SANS transaction d'abord
+      final lignesDeleted = await db.delete(
+        'lignes_vente',
+        where: 'vente_id = ?',
+        whereArgs: [id],
+      );
+      print('✅ $lignesDeleted ligne(s) supprimée(s)');
+
+      // Étape 3 : Vérifier qu'il ne reste plus de lignes
+      final verif = await db.rawQuery(
+        'SELECT COUNT(*) as count FROM lignes_vente WHERE vente_id = ?',
+        [id],
+      );
+      final restant = verif.first['count'] as int;
+
+      if (restant > 0) {
+        throw AppDatabaseException(
+          'Impossible de supprimer toutes les lignes de vente',
+        );
+      }
+
+      print('✅ Toutes les lignes supprimées, suppression de la vente...');
+
+      // Étape 4 : Maintenant supprimer la vente
+      final result = await db.delete(
+        'ventes',
+        where: 'id = ?',
+        whereArgs: [id],
+      );
+
+      print('✅ Vente $id supprimée avec succès');
+      return result;
     } catch (e) {
+      print('❌ Erreur suppression vente $id: $e');
       throw AppDatabaseException(
         'Erreur lors de la suppression de la vente: $e',
       );

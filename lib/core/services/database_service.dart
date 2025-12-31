@@ -200,6 +200,7 @@ class DatabaseService {
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         numero_facture TEXT UNIQUE NOT NULL,
         numero_ticket TEXT,
+        type_document TEXT DEFAULT 'ticket',
         client_id INTEGER,
         utilisateur_id INTEGER NOT NULL,
         session_caisse_id INTEGER,
@@ -300,7 +301,7 @@ class DatabaseService {
         FOREIGN KEY (produit_id) REFERENCES produits(id),
         FOREIGN KEY (variante_id) REFERENCES variantes_produits(id),
         FOREIGN KEY (utilisateur_id) REFERENCES utilisateurs(id),
-        FOREIGN KEY (vente_id) REFERENCES ventes(id),
+        FOREIGN KEY (vente_id) REFERENCES ventes(id) ON DELETE SET NULL,
         CHECK (type IN ('${AppConstants.mouvementEntree}', '${AppConstants.mouvementSortie}', '${AppConstants.mouvementAjustement}', '${AppConstants.mouvementVente}', '${AppConstants.mouvementRetour}', '${AppConstants.mouvementPerte}'))
       )
     ''');
@@ -425,7 +426,7 @@ class DatabaseService {
         date_transaction DATETIME DEFAULT CURRENT_TIMESTAMP,
         date_expiration DATE,
         FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE,
-        FOREIGN KEY (vente_id) REFERENCES ventes(id),
+        FOREIGN KEY (vente_id) REFERENCES ventes(id) ON DELETE SET NULL,
         CHECK (type IN ('gain', 'utilisation', 'expiration', 'ajustement'))
       )
     ''');
