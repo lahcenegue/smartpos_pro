@@ -3,12 +3,13 @@ import '../../../core/constants/app_colors.dart';
 import '../../../core/constants/app_styles.dart';
 import '../../../core/utils/formatters.dart';
 import '../../../core/services/print_service.dart';
+import '../../../core/services/auth_service.dart';
 import '../../../repositories/vente_repository.dart';
 import '../../../models/vente.dart';
 
 /// Dialog pour afficher l'historique des ventes
 class HistoriqueVentesDialog extends StatefulWidget {
-  const HistoriqueVentesDialog({Key? key}) : super(key: key);
+  const HistoriqueVentesDialog({super.key});
 
   @override
   State<HistoriqueVentesDialog> createState() => _HistoriqueVentesDialogState();
@@ -94,6 +95,99 @@ class _HistoriqueVentesDialogState extends State<HistoriqueVentesDialog> {
     }
   }
 
+  Future<void> _annulerVente(Vente vente) async {
+    // Demander le motif
+    final motifController = TextEditingController();
+
+    final confirme = await showDialog<bool>(
+      context: context,
+      builder:
+          (context) => AlertDialog(
+            title: const Text('Annuler la vente'),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Vente: ${vente.numeroFacture}',
+                  style: AppStyles.labelLarge.copyWith(
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                Text('Montant: ${Formatters.formatDevise(vente.montantTTC)}'),
+                const SizedBox(height: AppStyles.paddingL),
+                const Text(
+                  '⚠️ Cette action est irréversible !',
+                  style: TextStyle(color: AppColors.error),
+                ),
+                const SizedBox(height: AppStyles.paddingM),
+                TextField(
+                  controller: motifController,
+                  decoration: const InputDecoration(
+                    labelText: 'Motif d\'annulation *',
+                    hintText: 'Ex: Erreur de caisse, retour client...',
+                    border: OutlineInputBorder(),
+                  ),
+                  maxLines: 3,
+                ),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context, false),
+                child: const Text('Fermer'),
+              ),
+              ElevatedButton(
+                onPressed: () {
+                  if (motifController.text.trim().isEmpty) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('Veuillez indiquer un motif'),
+                        backgroundColor: AppColors.error,
+                      ),
+                    );
+                  } else {
+                    Navigator.pop(context, true);
+                  }
+                },
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.error,
+                ),
+                child: const Text('Annuler la vente'),
+              ),
+            ],
+          ),
+    );
+
+    if (confirme == true) {
+      try {
+        final authService = AuthService.instance;
+        await _venteRepo.annulerVente(
+          vente.id!,
+          motifController.text.trim(),
+          authService.currentUser?.id ?? 1,
+        );
+
+        _chargerVentes();
+
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Vente ${vente.numeroFacture} annulée'),
+              backgroundColor: AppColors.success,
+            ),
+          );
+        }
+      } catch (e) {
+        if (mounted) {
+          _showError('Erreur lors de l\'annulation: $e');
+        }
+      }
+    }
+
+    motifController.dispose();
+  }
+
   void _showError(String message) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text(message), backgroundColor: AppColors.error),
@@ -119,7 +213,7 @@ class _HistoriqueVentesDialogState extends State<HistoriqueVentesDialog> {
   @override
   Widget build(BuildContext context) {
     return Dialog(
-      child: Container(
+      child: SizedBox(
         width: 900,
         height: 700,
         child: Column(
@@ -206,6 +300,7 @@ class _HistoriqueVentesDialogState extends State<HistoriqueVentesDialog> {
             items: const [
               DropdownMenuItem(value: 'tous', child: Text('Toutes')),
               DropdownMenuItem(value: 'terminee', child: Text('Terminées')),
+              DropdownMenuItem(value: 'en_attente', child: Text('En attente')),
               DropdownMenuItem(value: 'annulee', child: Text('Annulées')),
             ],
             onChanged: (value) {
@@ -323,10 +418,25 @@ class _HistoriqueVentesDialogState extends State<HistoriqueVentesDialog> {
             ),
           ],
         ),
-        trailing: IconButton(
-          icon: const Icon(Icons.print),
-          tooltip: 'Réimprimer',
-          onPressed: () => _reimprimer(vente),
+        trailing: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // Bouton imprimer
+            IconButton(
+              icon: const Icon(Icons.print),
+              tooltip: 'Réimprimer',
+              onPressed: () => _reimprimer(vente),
+            ),
+
+            // Bouton annuler (seulement pour les ventes terminées)
+            if (vente.statut == 'terminee')
+              IconButton(
+                icon: const Icon(Icons.cancel_outlined),
+                tooltip: 'Annuler',
+                color: AppColors.error,
+                onPressed: () => _annulerVente(vente),
+              ),
+          ],
         ),
         children: [
           Padding(
@@ -380,7 +490,7 @@ class _HistoriqueVentesDialogState extends State<HistoriqueVentesDialog> {
                       ],
                     ),
                   );
-                }).toList(),
+                }),
               ],
             ),
           ),

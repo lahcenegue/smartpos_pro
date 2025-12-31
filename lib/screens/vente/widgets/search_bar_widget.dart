@@ -9,11 +9,11 @@ class SearchBarWidget extends StatelessWidget {
   final Function(String)? onScan;
 
   const SearchBarWidget({
-    Key? key,
+    super.key,
     required this.controller,
     required this.onSearch,
     this.onScan,
-  }) : super(key: key);
+  });
 
   @override
   Widget build(BuildContext context) {

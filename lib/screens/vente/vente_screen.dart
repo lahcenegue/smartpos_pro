@@ -10,6 +10,7 @@ import 'widgets/produit_grid.dart';
 import 'widgets/panier_widget.dart';
 import 'widgets/search_bar_widget.dart';
 import 'widgets/categorie_chips.dart';
+import 'widgets/stats_temps_reel_widget.dart';
 
 /// Écran principal de vente (caisse)
 class VenteScreen extends StatefulWidget {
@@ -194,6 +195,12 @@ class _VenteScreenState extends State<VenteScreen> {
               color: AppColors.background,
               child: Column(
                 children: [
+                  // Stats temps réel ← AJOUTER
+                  Padding(
+                    padding: const EdgeInsets.all(AppStyles.paddingM),
+                    child: const StatsTempsReelWidget(),
+                  ),
+
                   // Barre de recherche
                   SearchBarWidget(
                     controller: _searchController,

@@ -10,10 +10,10 @@ class AppDrawer extends StatelessWidget {
   final Function(String) onModuleSelected;
 
   const AppDrawer({
-    Key? key,
+    super.key,
     required this.currentModule,
     required this.onModuleSelected,
-  }) : super(key: key);
+  });
 
   @override
   Widget build(BuildContext context) {

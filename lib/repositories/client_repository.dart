@@ -215,8 +215,6 @@ class ClientRepository {
   /// UPDATE - Ajouter des points de fidélité
   Future<int> ajouterPoints(int clientId, int pointsAjoutes) async {
     try {
-      final db = await _db.database;
-
       // Récupérer les points actuels
       final client = await getClientById(clientId);
       if (client == null) {
@@ -235,8 +233,6 @@ class ClientRepository {
   /// UPDATE - Utiliser des points de fidélité
   Future<int> utiliserPoints(int clientId, int pointsUtilises) async {
     try {
-      final db = await _db.database;
-
       // Récupérer les points actuels
       final client = await getClientById(clientId);
       if (client == null) {

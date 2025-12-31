@@ -238,8 +238,6 @@ class ProduitRepository {
   /// UPDATE - Ajuster le stock (ajouter ou retirer)
   Future<int> ajusterStock(int produitId, int ajustement) async {
     try {
-      final db = await _db.database;
-
       // Récupérer le stock actuel
       final produit = await getProduitById(produitId);
       if (produit == null) {

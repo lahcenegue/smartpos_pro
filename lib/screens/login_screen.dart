@@ -11,7 +11,7 @@ import '../core/utils/validators.dart';
 ///
 /// Permet à l'utilisateur de se connecter avec son code PIN
 class LoginScreen extends StatefulWidget {
-  const LoginScreen({Key? key}) : super(key: key);
+  const LoginScreen({super.key});
 
   @override
   State<LoginScreen> createState() => _LoginScreenState();

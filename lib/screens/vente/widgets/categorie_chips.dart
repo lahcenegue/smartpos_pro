@@ -10,10 +10,10 @@ class CategorieChips extends StatefulWidget {
   final Function(int?) onCategorieSelected;
 
   const CategorieChips({
-    Key? key,
+    super.key,
     required this.categorieSelectionnee,
     required this.onCategorieSelected,
-  }) : super(key: key);
+  });
 
   @override
   State<CategorieChips> createState() => _CategorieChipsState();
@@ -123,7 +123,7 @@ class _CategorieChipsState extends State<CategorieChips> {
                 ),
               ),
             );
-          }).toList(),
+          }),
         ],
       ),
     );

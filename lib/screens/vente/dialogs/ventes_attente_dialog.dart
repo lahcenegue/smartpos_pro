@@ -9,7 +9,7 @@ import '../../../models/vente.dart';
 
 /// Dialog pour afficher et gérer les ventes en attente
 class VentesAttenteDialog extends StatefulWidget {
-  const VentesAttenteDialog({Key? key}) : super(key: key);
+  const VentesAttenteDialog({super.key});
 
   @override
   State<VentesAttenteDialog> createState() => _VentesAttenteDialogState();
@@ -129,7 +129,7 @@ class _VentesAttenteDialogState extends State<VentesAttenteDialog> {
   @override
   Widget build(BuildContext context) {
     return Dialog(
-      child: Container(
+      child: SizedBox(
         width: 700,
         height: 600,
         child: Column(

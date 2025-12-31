@@ -148,7 +148,7 @@ class PrintService {
                     ],
                   ),
                 );
-              }).toList(),
+              }),
 
               pw.SizedBox(height: 8),
               pw.Divider(),
@@ -342,7 +342,7 @@ class PrintService {
                         ),
                       ],
                     );
-                  }).toList(),
+                  }),
                 ],
               ),
 

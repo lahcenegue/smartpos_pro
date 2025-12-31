@@ -1,3 +1,5 @@
+import 'package:smartpos_pro/core/constants/app_constants.dart';
+
 import '../core/services/database_service.dart';
 import '../core/errors/exceptions.dart';
 import '../models/vente.dart';
@@ -366,42 +368,121 @@ class VenteRepository {
   }
 
   /// UPDATE - Annuler une vente
-  Future<int> annulerVente(int venteId, String motif) async {
+  Future<int> annulerVente(int id, String motif, int utilisateurId) async {
     try {
       final db = await _db.database;
 
       return await db.transaction((txn) async {
+        // Récupérer la vente avec ses lignes
+        final venteMap = await txn.query(
+          'ventes',
+          where: 'id = ?',
+          whereArgs: [id],
+        );
+
+        if (venteMap.isEmpty) {
+          throw AppDatabaseException('Vente introuvable');
+        }
+
+        final vente = venteMap.first;
+
+        // Vérifier que la vente n'est pas déjà annulée
+        if (vente['statut'] == AppConstants.venteAnnulee) {
+          throw AppDatabaseException('Cette vente est déjà annulée');
+        }
+
+        // Récupérer les lignes de vente
+        final lignes = await txn.query(
+          'lignes_vente',
+          where: 'vente_id = ?',
+          whereArgs: [id],
+        );
+
+        // Remettre le stock de chaque produit
+        for (var ligne in lignes) {
+          final produitId = ligne['produit_id'] as int;
+          final quantite = ligne['quantite'] as double;
+
+          // Remettre le stock
+          await txn.rawUpdate(
+            'UPDATE produits SET stock = stock + ? WHERE id = ?',
+            [quantite.toInt(), produitId],
+          );
+
+          // Remettre en_rupture à 0 si stock > 0
+          await txn.rawUpdate(
+            'UPDATE produits SET en_rupture = 0 WHERE id = ? AND stock > 0',
+            [produitId],
+          );
+
+          // Créer un mouvement de stock
+          await txn.insert('mouvements_stock', {
+            'produit_id': produitId,
+            'type': AppConstants.mouvementRetour,
+            'quantite': quantite,
+            'stock_avant': 0, // TODO: récupérer le vrai stock avant
+            'stock_apres': 0, // TODO: récupérer le vrai stock après
+            'motif': 'Annulation vente ${vente['numero_facture']}',
+            'reference': vente['numero_facture'],
+            'utilisateur_id': utilisateurId,
+            'vente_id': id,
+            'date_mouvement': DateTime.now().toIso8601String(),
+          });
+        }
+
+        // Annuler les points de fidélité si client
+        if (vente['client_id'] != null) {
+          final clientId = vente['client_id'] as int;
+          final pointsGagnes = vente['points_gagnes'] as int;
+
+          if (pointsGagnes > 0) {
+            // Récupérer le solde actuel
+            final clientMap = await txn.query(
+              'clients',
+              columns: ['points_fidelite'],
+              where: 'id = ?',
+              whereArgs: [clientId],
+            );
+
+            final soldeAvant = clientMap.first['points_fidelite'] as int;
+            final soldeApres = soldeAvant - pointsGagnes;
+
+            // Retirer les points
+            await txn.update(
+              'clients',
+              {'points_fidelite': soldeApres >= 0 ? soldeApres : 0},
+              where: 'id = ?',
+              whereArgs: [clientId],
+            );
+
+            // Enregistrer la transaction de points
+            await txn.insert('points_fidelite', {
+              'client_id': clientId,
+              'type': 'ajustement',
+              'points': -pointsGagnes,
+              'vente_id': id,
+              'motif': 'Annulation vente',
+              'solde_avant': soldeAvant,
+              'solde_apres': soldeApres >= 0 ? soldeApres : 0,
+              'date_transaction': DateTime.now().toIso8601String(),
+            });
+          }
+        }
+
         // Marquer la vente comme annulée
-        await txn.update(
+        return await txn.update(
           'ventes',
           {
-            'statut': 'annulee',
+            'statut': AppConstants.venteAnnulee,
             'motif_annulation': motif,
             'date_annulation': DateTime.now().toIso8601String(),
           },
           where: 'id = ?',
-          whereArgs: [venteId],
+          whereArgs: [id],
         );
-
-        // Récupérer les lignes pour remettre le stock
-        final lignes = await getLignesVente(venteId);
-
-        // Remettre le stock pour chaque produit
-        for (var ligne in lignes) {
-          await txn.rawUpdate(
-            '''
-            UPDATE produits
-            SET stock = stock + ?,
-                en_rupture = CASE WHEN stock + ? > 0 THEN 0 ELSE en_rupture END
-            WHERE id = ?
-          ''',
-            [ligne.quantite, ligne.quantite, ligne.produitId],
-          );
-        }
-
-        return 1;
       });
     } catch (e) {
+      print('❌ Erreur annulation vente: $e');
       throw AppDatabaseException(
         'Erreur lors de l\'annulation de la vente: $e',
       );

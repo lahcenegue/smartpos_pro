@@ -10,10 +10,10 @@ class ProduitGrid extends StatelessWidget {
   final Function(Produit) onProduitTap;
 
   const ProduitGrid({
-    Key? key,
+    super.key,
     required this.produits,
     required this.onProduitTap,
-  }) : super(key: key);
+  });
 
   @override
   Widget build(BuildContext context) {

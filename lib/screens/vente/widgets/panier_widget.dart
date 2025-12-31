@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:smartpos_pro/core/constants/app_constants.dart';
 import 'package:smartpos_pro/models/client.dart';
 import '../../../core/constants/app_colors.dart';
 import '../../../core/constants/app_styles.dart';
@@ -10,7 +11,7 @@ import '../../../core/services/auth_service.dart';
 
 /// Widget du panier
 class PanierWidget extends StatelessWidget {
-  const PanierWidget({Key? key}) : super(key: key);
+  const PanierWidget({super.key});
 
   @override
   Widget build(BuildContext context) {
@@ -191,19 +192,32 @@ class PanierWidget extends StatelessWidget {
                     ],
                   ),
                 ),
+                const SizedBox(width: AppStyles.paddingS),
 
-                const SizedBox(width: AppStyles.paddingM),
+                // Bouton supprimer
+                IconButton(
+                  icon: const Icon(Icons.delete_outline, size: 20),
+                  color: AppColors.error,
+                  tooltip: 'Supprimer',
+                  onPressed: () {
+                    context.read<VenteProvider>().supprimerLigne(index);
+                  },
+                  padding: const EdgeInsets.all(4),
+                  constraints: const BoxConstraints(
+                    minWidth: 32,
+                    minHeight: 32,
+                  ),
+                ),
+
+                const SizedBox(width: AppStyles.paddingS),
 
                 // Total de la ligne
-                SizedBox(
-                  width: 80,
-                  child: Text(
-                    Formatters.formatDevise(ligne.totalTTC),
-                    style: AppStyles.labelLarge.copyWith(
-                      fontWeight: FontWeight.bold,
-                    ),
-                    textAlign: TextAlign.right,
+                Text(
+                  Formatters.formatDevise(ligne.totalTTC),
+                  style: AppStyles.labelLarge.copyWith(
+                    fontWeight: FontWeight.bold,
                   ),
+                  textAlign: TextAlign.right,
                 ),
               ],
             ),
@@ -378,6 +392,47 @@ class PanierWidget extends StatelessWidget {
 
                     const SizedBox(height: AppStyles.paddingM),
 
+                    // Boutons remises (si panier non vide)
+                    if (!venteProvider.panierVide) ...[
+                      Row(
+                        children: [
+                          // Remise globale
+                          Expanded(
+                            child: OutlinedButton.icon(
+                              onPressed: () => _appliquerRemiseGlobale(context),
+                              icon: const Icon(Icons.discount, size: 18),
+                              label: Text(
+                                venteProvider.remiseGlobale > 0
+                                    ? 'Remise: ${Formatters.formatDevise(venteProvider.remiseGlobale)}'
+                                    : 'Remise globale',
+                                style: const TextStyle(fontSize: 12),
+                              ),
+                              style: OutlinedButton.styleFrom(
+                                foregroundColor:
+                                    venteProvider.remiseGlobale > 0
+                                        ? AppColors.success
+                                        : AppColors.textSecondary,
+                              ),
+                            ),
+                          ),
+
+                          const SizedBox(width: AppStyles.paddingS),
+
+                          // Annuler remise
+                          if (venteProvider.remiseGlobale > 0)
+                            IconButton(
+                              icon: const Icon(Icons.close, size: 18),
+                              tooltip: 'Annuler la remise',
+                              onPressed: () {
+                                venteProvider.appliquerRemiseGlobale(0);
+                              },
+                            ),
+                        ],
+                      ),
+
+                      const SizedBox(height: AppStyles.paddingM),
+                    ],
+
                     // Bouton Payer
                     SizedBox(
                       width: double.infinity,
@@ -431,6 +486,144 @@ class PanierWidget extends StatelessWidget {
           );
         },
       ),
+    );
+  }
+
+  void _appliquerRemiseGlobale(BuildContext context) {
+    final venteProvider = context.read<VenteProvider>();
+    final remiseController = TextEditingController();
+
+    showDialog(
+      context: context,
+      builder: (context) {
+        String typeRemise = 'montant'; // 'montant' ou 'pourcentage'
+
+        return StatefulBuilder(
+          builder:
+              (context, setState) => AlertDialog(
+                title: const Text('Remise globale'),
+                content: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      'Total avant remise: ${Formatters.formatDevise(venteProvider.totalAvantRemise)}',
+                      style: AppStyles.labelLarge,
+                    ),
+
+                    const SizedBox(height: AppStyles.paddingL),
+
+                    // Type de remise
+                    SegmentedButton<String>(
+                      segments: const [
+                        ButtonSegment(
+                          value: 'montant',
+                          label: Text('Montant'),
+                          icon: Icon(Icons.attach_money, size: 16),
+                        ),
+                        ButtonSegment(
+                          value: 'pourcentage',
+                          label: Text('Pourcentage'),
+                          icon: Icon(Icons.percent, size: 16),
+                        ),
+                      ],
+                      selected: {typeRemise},
+                      onSelectionChanged: (Set<String> newSelection) {
+                        setState(() {
+                          typeRemise = newSelection.first;
+                        });
+                      },
+                    ),
+
+                    const SizedBox(height: AppStyles.paddingM),
+
+                    // Champ montant/pourcentage
+                    TextField(
+                      controller: remiseController,
+                      keyboardType: const TextInputType.numberWithOptions(
+                        decimal: true,
+                      ),
+                      decoration: InputDecoration(
+                        labelText:
+                            typeRemise == 'montant'
+                                ? 'Montant de la remise'
+                                : 'Pourcentage',
+                        suffixText:
+                            typeRemise == 'montant'
+                                ? AppConstants.deviseSymbole
+                                : '%',
+                        border: const OutlineInputBorder(),
+                      ),
+                      autofocus: true,
+                    ),
+                  ],
+                ),
+                actions: [
+                  TextButton(
+                    onPressed: () {
+                      remiseController.dispose(); // ← ICI c'est OK
+                      Navigator.pop(context);
+                    },
+                    child: const Text('Annuler'),
+                  ),
+                  ElevatedButton(
+                    onPressed: () {
+                      final valeur = double.tryParse(
+                        remiseController.text.replaceAll(',', '.'),
+                      );
+
+                      if (valeur == null || valeur <= 0) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text('Valeur invalide'),
+                            backgroundColor: AppColors.error,
+                          ),
+                        );
+                        return;
+                      }
+
+                      double remiseMontant;
+                      if (typeRemise == 'pourcentage') {
+                        if (valeur > 100) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text(
+                                'Le pourcentage ne peut pas dépasser 100%',
+                              ),
+                              backgroundColor: AppColors.error,
+                            ),
+                          );
+                          return;
+                        }
+                        remiseMontant =
+                            venteProvider.totalAvantRemise * (valeur / 100);
+                      } else {
+                        if (valeur > venteProvider.totalAvantRemise) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text(
+                                'La remise ne peut pas dépasser le total',
+                              ),
+                              backgroundColor: AppColors.error,
+                            ),
+                          );
+                          return;
+                        }
+                        remiseMontant = valeur;
+                      }
+
+                      venteProvider.appliquerRemiseGlobale(remiseMontant);
+                      remiseController.dispose(); // ← ICI c'est OK aussi
+                      Navigator.pop(context);
+                    },
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppColors.success,
+                    ),
+                    child: const Text('Appliquer'),
+                  ),
+                ],
+              ),
+        );
+      },
     );
   }
 
