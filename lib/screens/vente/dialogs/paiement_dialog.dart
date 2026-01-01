@@ -1,153 +1,391 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:provider/provider.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:printing/printing.dart';
+import 'package:path_provider/path_provider.dart';
 import '../../../core/constants/app_colors.dart';
 import '../../../core/constants/app_styles.dart';
 import '../../../core/constants/app_constants.dart';
 import '../../../core/utils/formatters.dart';
-import '../../../core/utils/validators.dart';
-import '../../../core/services/auth_service.dart';
-import '../../../providers/vente_provider.dart';
-import '../../../models/vente.dart';
 import '../../../core/services/print_service.dart';
+import '../../../core/services/auth_service.dart';
+import '../../../providers/vente/vente_providers.dart';
+import '../../../models/vente.dart';
 
-/// Dialog de paiement
-class PaiementDialog extends StatefulWidget {
+class PaiementDialog extends ConsumerStatefulWidget {
   const PaiementDialog({super.key});
 
   @override
-  State<PaiementDialog> createState() => _PaiementDialogState();
+  ConsumerState<PaiementDialog> createState() => _PaiementDialogState();
 }
 
-class _PaiementDialogState extends State<PaiementDialog> {
-  final _formKey = GlobalKey<FormState>();
-  final _montantController = TextEditingController();
-  final _montantEspecesController = TextEditingController();
-  final _montantCarteController = TextEditingController();
-  final _montantChequeController = TextEditingController();
-
+class _PaiementDialogState extends ConsumerState<PaiementDialog> {
   String _modePaiement = AppConstants.paiementEspeces;
-  bool _isProcessing = false;
-
-  @override
-  void initState() {
-    super.initState();
-    _calculerMontantParDefaut();
-  }
+  final TextEditingController _montantController = TextEditingController();
+  final TextEditingController _montantEspecesController =
+      TextEditingController();
+  final TextEditingController _montantCarteController = TextEditingController();
 
   @override
   void dispose() {
     _montantController.dispose();
     _montantEspecesController.dispose();
     _montantCarteController.dispose();
-    _montantChequeController.dispose();
     super.dispose();
   }
 
-  void _calculerMontantParDefaut() {
-    final venteProvider = context.read<VenteProvider>();
-    final total = venteProvider.totalTTC;
+  @override
+  Widget build(BuildContext context) {
+    final panier = ref.watch(panierProvider);
+    final totalTTC = ref.watch(totalTTCProvider);
+    final totalHT = ref.watch(totalHTProvider);
+    final totalTVA = ref.watch(totalTVAProvider);
+    final nombreArticles = ref.watch(nombreArticlesProvider);
 
-    // Arrondir au multiple de 10 supérieur pour les espèces
-    if (_modePaiement == AppConstants.paiementEspeces) {
-      final montantArrondi = (total / 10).ceil() * 10;
-      _montantController.text = montantArrondi.toString();
-    } else {
-      _montantController.text = total.toStringAsFixed(2);
-    }
-  }
+    return Dialog(
+      child: Container(
+        width: 600,
+        padding: const EdgeInsets.all(AppStyles.paddingL),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            // Header
+            Row(
+              children: [
+                const Icon(Icons.payment, color: AppColors.primary),
+                const SizedBox(width: AppStyles.paddingM),
+                Text('Paiement', style: AppStyles.heading2),
+                const Spacer(),
+                IconButton(
+                  icon: const Icon(Icons.close),
+                  onPressed: () => Navigator.pop(context),
+                ),
+              ],
+            ),
 
-  void _onModePaiementChanged(String? mode) {
-    if (mode == null) return;
+            const Divider(height: AppStyles.paddingL),
 
-    setState(() {
-      _modePaiement = mode;
-    });
+            // Récapitulatif
+            _buildRecapitulatif(nombreArticles, totalHT, totalTVA, totalTTC),
 
-    _calculerMontantParDefaut();
-  }
+            const SizedBox(height: AppStyles.paddingL),
 
-  // Dans _validerPaiement(), ajoute ce debug AVANT finaliserVente
-  Future<void> _validerPaiement() async {
-    if (!_formKey.currentState!.validate()) {
-      return;
-    }
+            // Modes de paiement
+            _buildModesPaiement(),
 
-    setState(() => _isProcessing = true);
+            const SizedBox(height: AppStyles.paddingL),
 
-    try {
-      final venteProvider = context.read<VenteProvider>();
-      final authService = AuthService.instance;
+            // Montant selon le mode
+            if (_modePaiement == AppConstants.paiementMixte)
+              _buildPaiementMixte(totalTTC)
+            else
+              _buildMontantSimple(totalTTC),
 
-      // 🔍 DEBUG : Afficher les infos
-      print('=== DEBUG VENTE ===');
-      print('Client ID: ${venteProvider.clientSelectionne?.id}');
-      print('Utilisateur ID: ${authService.currentUser?.id}');
-      print('Panier vide: ${venteProvider.panierVide}');
-      print('Nombre lignes: ${venteProvider.panier.length}');
-      print('Générer facture: ${venteProvider.genererFacture}');
-      print('==================');
+            const SizedBox(height: AppStyles.paddingL),
 
-      double montantPaye = 0;
-      double montantEspeces = 0;
-      double montantCarte = 0;
-      double montantCheque = 0;
-
-      if (_modePaiement == AppConstants.paiementMixte) {
-        montantEspeces =
-            double.tryParse(
-              _montantEspecesController.text.replaceAll(',', '.'),
-            ) ??
-            0;
-        montantCarte =
-            double.tryParse(
-              _montantCarteController.text.replaceAll(',', '.'),
-            ) ??
-            0;
-        montantCheque =
-            double.tryParse(
-              _montantChequeController.text.replaceAll(',', '.'),
-            ) ??
-            0;
-        montantPaye = montantEspeces + montantCarte + montantCheque;
-      } else {
-        montantPaye =
-            double.tryParse(_montantController.text.replaceAll(',', '.')) ?? 0;
-      }
-
-      // Finaliser la vente
-      final vente = await venteProvider.finaliserVente(
-        modePaiement: _modePaiement,
-        montantPaye: montantPaye,
-        montantEspeces: montantEspeces,
-        montantCarte: montantCarte,
-        montantCheque: montantCheque,
-        utilisateurId: authService.currentUser?.id,
-      );
-
-      if (mounted) {
-        Navigator.of(context).pop();
-        _afficherRecapitulatif(vente);
-      }
-    } catch (e) {
-      print('=== ERREUR COMPLÈTE ===');
-      print(e);
-      print('=======================');
-
-      if (mounted) {
-        setState(() => _isProcessing = false);
-        _showError(e.toString());
-      }
-    }
-  }
-
-  void _showError(String message) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message), backgroundColor: AppColors.error),
+            // Boutons
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton(
+                    onPressed: () => Navigator.pop(context),
+                    child: const Text('Annuler'),
+                  ),
+                ),
+                const SizedBox(width: AppStyles.paddingM),
+                Expanded(
+                  child: ElevatedButton(
+                    onPressed: () => _validerPaiement(context, totalTTC),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppColors.success,
+                    ),
+                    child: const Text('Valider'),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
     );
   }
 
-  void _afficherRecapitulatif(Vente vente) {
+  Widget _buildRecapitulatif(
+    int nombreArticles,
+    double totalHT,
+    double totalTVA,
+    double totalTTC,
+  ) {
+    return Container(
+      padding: const EdgeInsets.all(AppStyles.paddingM),
+      decoration: BoxDecoration(
+        color: AppColors.background,
+        borderRadius: BorderRadius.circular(AppStyles.radiusM),
+      ),
+      child: Column(
+        children: [
+          _buildLigneRecap('Articles', '$nombreArticles'),
+          const SizedBox(height: AppStyles.paddingS),
+          const Divider(),
+          _buildLigneRecap(
+            'Total TTC',
+            Formatters.formatDevise(totalTTC),
+            isTotal: true,
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildLigneRecap(String label, String valeur, {bool isTotal = false}) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        Text(
+          label,
+          style:
+              isTotal
+                  ? AppStyles.labelLarge.copyWith(fontWeight: FontWeight.bold)
+                  : AppStyles.labelMedium,
+        ),
+        Text(
+          valeur,
+          style:
+              isTotal
+                  ? AppStyles.prixLarge.copyWith(color: AppColors.primary)
+                  : AppStyles.labelMedium.copyWith(fontWeight: FontWeight.bold),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildModesPaiement() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text('Mode de paiement', style: AppStyles.labelLarge),
+        const SizedBox(height: AppStyles.paddingM),
+        Wrap(
+          spacing: AppStyles.paddingM,
+          children: [
+            _buildModePaiementChip(
+              AppConstants.paiementEspeces,
+              Icons.money,
+              'Espèces',
+            ),
+            _buildModePaiementChip(
+              AppConstants.paiementCarte,
+              Icons.credit_card,
+              'Carte',
+            ),
+            _buildModePaiementChip(
+              AppConstants.paiementCheque,
+              Icons.receipt,
+              'Chèque',
+            ),
+            _buildModePaiementChip(
+              AppConstants.paiementMixte,
+              Icons.payments,
+              'Mixte',
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  Widget _buildModePaiementChip(String mode, IconData icon, String label) {
+    final isSelected = _modePaiement == mode;
+    return ChoiceChip(
+      label: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 18),
+          const SizedBox(width: AppStyles.paddingS),
+          Text(label),
+        ],
+      ),
+      selected: isSelected,
+      onSelected: (selected) {
+        setState(() {
+          _modePaiement = mode;
+          _montantController.clear();
+          _montantEspecesController.clear();
+          _montantCarteController.clear();
+        });
+      },
+      selectedColor: AppColors.primary.withOpacity(0.2),
+    );
+  }
+
+  Widget _buildMontantSimple(double totalTTC) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text('Montant reçu', style: AppStyles.labelLarge),
+        const SizedBox(height: AppStyles.paddingM),
+        TextField(
+          controller: _montantController,
+          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+          decoration: InputDecoration(
+            prefixText: AppConstants.deviseSymbole,
+            border: const OutlineInputBorder(),
+            hintText: '0.00',
+          ),
+          autofocus: true,
+          inputFormatters: [
+            FilteringTextInputFormatter.allow(RegExp(r'^\d+\.?\d{0,2}')),
+          ],
+          onChanged: (value) => setState(() {}),
+        ),
+        const SizedBox(height: AppStyles.paddingM),
+        _buildRenduMonnaie(totalTTC),
+      ],
+    );
+  }
+
+  Widget _buildPaiementMixte(double totalTTC) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text('Répartition', style: AppStyles.labelLarge),
+        const SizedBox(height: AppStyles.paddingM),
+        Row(
+          children: [
+            Expanded(
+              child: TextField(
+                controller: _montantEspecesController,
+                keyboardType: const TextInputType.numberWithOptions(
+                  decimal: true,
+                ),
+                decoration: const InputDecoration(
+                  labelText: 'Espèces',
+                  prefixText: AppConstants.deviseSymbole,
+                  border: OutlineInputBorder(),
+                ),
+                onChanged: (value) => setState(() {}),
+              ),
+            ),
+            const SizedBox(width: AppStyles.paddingM),
+            Expanded(
+              child: TextField(
+                controller: _montantCarteController,
+                keyboardType: const TextInputType.numberWithOptions(
+                  decimal: true,
+                ),
+                decoration: const InputDecoration(
+                  labelText: 'Carte',
+                  prefixText: AppConstants.deviseSymbole,
+                  border: OutlineInputBorder(),
+                ),
+                onChanged: (value) => setState(() {}),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: AppStyles.paddingM),
+        _buildRenduMonnaie(totalTTC),
+      ],
+    );
+  }
+
+  Widget _buildRenduMonnaie(double totalTTC) {
+    final montantPaye = _calculerMontantPaye();
+    final rendu = montantPaye - totalTTC;
+
+    return Container(
+      padding: const EdgeInsets.all(AppStyles.paddingM),
+      decoration: BoxDecoration(
+        color:
+            rendu < 0
+                ? AppColors.error.withOpacity(0.1)
+                : AppColors.success.withOpacity(0.1),
+        borderRadius: BorderRadius.circular(AppStyles.radiusM),
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(
+            rendu < 0 ? 'Manquant' : 'Rendu',
+            style: AppStyles.labelLarge.copyWith(
+              color: rendu < 0 ? AppColors.error : AppColors.success,
+            ),
+          ),
+          Text(
+            Formatters.formatDevise(rendu.abs()),
+            style: AppStyles.prixLarge.copyWith(
+              color: rendu < 0 ? AppColors.error : AppColors.success,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  double _calculerMontantPaye() {
+    if (_modePaiement == AppConstants.paiementMixte) {
+      final especes =
+          double.tryParse(
+            _montantEspecesController.text.replaceAll(',', '.'),
+          ) ??
+          0;
+      final carte =
+          double.tryParse(_montantCarteController.text.replaceAll(',', '.')) ??
+          0;
+      return especes + carte;
+    } else {
+      return double.tryParse(_montantController.text.replaceAll(',', '.')) ?? 0;
+    }
+  }
+
+  Future<void> _validerPaiement(BuildContext context, double totalTTC) async {
+    final montantPaye = _calculerMontantPaye();
+
+    if (montantPaye < totalTTC) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Le montant payé est insuffisant'),
+          backgroundColor: AppColors.error,
+        ),
+      );
+      return;
+    }
+
+    try {
+      final userId = AuthService.instance.currentUser?.id ?? 1;
+
+      final vente = await ref
+          .read(venteFinalisationProvider.notifier)
+          .finaliser(
+            modePaiement: _modePaiement,
+            montantPaye: montantPaye,
+            utilisateurId: userId,
+          );
+
+      if (context.mounted) {
+        Navigator.pop(context);
+        _afficherRecapitulatif(context, vente);
+      }
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Erreur: $e'),
+            backgroundColor: AppColors.error,
+          ),
+        );
+      }
+    }
+  }
+
+  void _afficherRecapitulatif(BuildContext context, Vente vente) async {
+    // Vérifier si une imprimante est disponible
+    final imprimanteDisponible = await _verifierImprimante();
+
+    if (!context.mounted) return;
+
     showDialog(
       context: context,
       barrierDismissible: false,
@@ -155,560 +393,249 @@ class _PaiementDialogState extends State<PaiementDialog> {
           (context) => AlertDialog(
             title: Row(
               children: [
-                Icon(Icons.check_circle, color: AppColors.success, size: 32),
+                const Icon(
+                  Icons.check_circle,
+                  color: AppColors.success,
+                  size: 32,
+                ),
                 const SizedBox(width: AppStyles.paddingM),
-                Text(vente.estFacture ? 'Facture émise' : 'Vente enregistrée'),
+                const Text('Vente enregistrée'),
               ],
             ),
             content: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  '${vente.estFacture ? "N° Facture" : "N° Ticket"}: ${vente.numeroFacture}',
-                  style: AppStyles.labelLarge,
-                ),
+                Text('N° ${vente.numeroFacture}', style: AppStyles.heading3),
                 const SizedBox(height: AppStyles.paddingM),
-
-                if (vente.estFacture) ...[
-                  Text(
-                    'Sous-total HT: ${Formatters.formatDevise(vente.montantHT)}',
-                  ),
-                  Text('TVA: ${Formatters.formatDevise(vente.montantTVA)}'),
-                ],
-
                 Text('Total: ${Formatters.formatDevise(vente.montantTTC)}'),
                 Text('Payé: ${Formatters.formatDevise(vente.montantPaye)}'),
-
                 if (vente.montantRendu > 0)
-                  Text(
-                    'Rendu: ${Formatters.formatDevise(vente.montantRendu)}',
-                    style: AppStyles.heading3.copyWith(
-                      color: AppColors.success,
-                    ),
-                  ),
+                  Text('Rendu: ${Formatters.formatDevise(vente.montantRendu)}'),
               ],
             ),
             actions: [
               TextButton(
-                onPressed: () => Navigator.of(context).pop(),
+                onPressed: () => Navigator.pop(context),
                 child: const Text('Fermer'),
               ),
-              ElevatedButton.icon(
-                onPressed: () async {
-                  try {
-                    // Imprimer selon le type de document
-                    if (vente.estFacture) {
-                      await PrintService.instance.imprimerFacture(vente);
-                    } else {
-                      await PrintService.instance.imprimerTicket(vente);
-                    }
 
-                    if (context.mounted) {
-                      Navigator.of(context).pop();
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(
-                          content: Text(
-                            '${vente.estFacture ? "Facture" : "Ticket"} imprimé',
-                          ),
-                          backgroundColor: AppColors.success,
-                        ),
-                      );
-                    }
-                  } catch (e) {
-                    if (context.mounted) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(
-                          content: Text('Erreur d\'impression: $e'),
-                          backgroundColor: AppColors.error,
-                        ),
-                      );
-                    }
-                  }
-                },
-                icon: const Icon(Icons.print),
-                label: Text(
-                  vente.estFacture ? 'Imprimer Facture' : 'Imprimer Ticket',
+              // Bouton Sauvegarder (optionnel)
+              if (!imprimanteDisponible)
+                ElevatedButton.icon(
+                  onPressed: () => _sauvegarderPDF(context, vente),
+                  icon: const Icon(Icons.save),
+                  label: const Text('Sauvegarder PDF'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.info,
+                  ),
                 ),
+
+              // Bouton Imprimer (prioritaire si imprimante disponible)
+              if (imprimanteDisponible)
+                ElevatedButton.icon(
+                  onPressed: () => _imprimerTicket(context, vente),
+                  icon: const Icon(Icons.print),
+                  label: Text(
+                    'Imprimer ${vente.estFacture ? "Facture" : "Ticket"}',
+                  ),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.primary,
+                  ),
+                ),
+
+              // Bouton Aperçu (toujours disponible)
+              ElevatedButton.icon(
+                onPressed: () => _apercuPDF(context, vente),
+                icon: const Icon(Icons.visibility),
+                label: const Text('Aperçu'),
               ),
             ],
           ),
     );
   }
 
-  @override
-  Widget build(BuildContext context) {
-    return Dialog(
-      child: Container(
-        width: 600,
-        constraints: const BoxConstraints(maxHeight: 700),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            // Header
-            _buildHeader(),
+  /// Vérifier si une imprimante est disponible
+  Future<bool> _verifierImprimante() async {
+    try {
+      final imprimantes = await Printing.listPrinters();
+      return imprimantes.isNotEmpty;
+    } catch (e) {
+      return false;
+    }
+  }
 
-            // Body
-            Flexible(
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.all(AppStyles.paddingL),
-                child: Form(
-                  key: _formKey,
+  /// Imprimer directement le ticket
+  Future<void> _imprimerTicket(BuildContext context, Vente vente) async {
+    try {
+      // Générer le PDF
+      final pdf =
+          vente.estFacture
+              ? await PrintService.instance.genererFacturePDF(vente)
+              : await PrintService.instance.genererTicketPDF(vente);
+
+      // Sauvegarder automatiquement
+      final directory = await getApplicationDocumentsDirectory();
+      final folder = Directory('${directory.path}/SmartPOS');
+      if (!await folder.exists()) {
+        await folder.create(recursive: true);
+      }
+
+      final path = '${folder.path}/${vente.numeroFacture}.pdf';
+      final file = File(path);
+      await file.writeAsBytes(await pdf.save());
+
+      if (context.mounted) {
+        // Afficher un message avec option d'ouvrir le fichier
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('PDF généré: ${vente.numeroFacture}.pdf'),
+            backgroundColor: AppColors.success,
+            duration: const Duration(seconds: 5),
+            action: SnackBarAction(
+              label: 'Ouvrir dossier',
+              textColor: Colors.white,
+              onPressed: () async {
+                await Process.run('explorer', [folder.path]);
+              },
+            ),
+          ),
+        );
+
+        // Ouvrir automatiquement le PDF avec l'application par défaut
+        await Process.run('cmd', ['/c', 'start', '', path]);
+      }
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Erreur: $e'),
+            backgroundColor: AppColors.error,
+          ),
+        );
+      }
+    }
+  }
+
+  /// Sauvegarder le PDF dans Documents
+  Future<void> _sauvegarderPDF(BuildContext context, Vente vente) async {
+    try {
+      final pdf =
+          vente.estFacture
+              ? await PrintService.instance.genererFacturePDF(vente)
+              : await PrintService.instance.genererTicketPDF(vente);
+
+      final directory = await getApplicationDocumentsDirectory();
+      final path = '${directory.path}/SmartPOS/${vente.numeroFacture}.pdf';
+
+      // Créer le dossier si nécessaire
+      final folder = Directory('${directory.path}/SmartPOS');
+      if (!await folder.exists()) {
+        await folder.create(recursive: true);
+      }
+
+      final file = File(path);
+      await file.writeAsBytes(await pdf.save());
+
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('PDF sauvegardé: $path'),
+            backgroundColor: AppColors.success,
+            duration: const Duration(seconds: 5),
+            action: SnackBarAction(
+              label: 'Ouvrir',
+              textColor: Colors.white,
+              onPressed: () async {
+                await Process.run('explorer', [folder.path]);
+              },
+            ),
+          ),
+        );
+      }
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Erreur de sauvegarde: $e'),
+            backgroundColor: AppColors.error,
+          ),
+        );
+      }
+    }
+  }
+
+  /// Afficher l'aperçu PDF dans un viewer personnalisé
+  Future<void> _apercuPDF(BuildContext context, Vente vente) async {
+    try {
+      // Générer le PDF
+      final pdf =
+          vente.estFacture
+              ? await PrintService.instance.genererFacturePDF(vente)
+              : await PrintService.instance.genererTicketPDF(vente);
+
+      final pdfBytes = await pdf.save();
+
+      if (context.mounted) {
+        // Afficher dans un dialog avec PdfPreview
+        showDialog(
+          context: context,
+          builder:
+              (context) => Dialog(
+                child: Container(
+                  width: 800,
+                  height: 600,
+                  padding: const EdgeInsets.all(16),
                   child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      // Récapitulatif
-                      _buildRecapitulatif(),
+                      // Header
+                      Row(
+                        children: [
+                          const Icon(
+                            Icons.picture_as_pdf,
+                            color: AppColors.primary,
+                          ),
+                          const SizedBox(width: 8),
+                          Text(
+                            'Aperçu - ${vente.numeroFacture}',
+                            style: AppStyles.heading3,
+                          ),
+                          const Spacer(),
+                          IconButton(
+                            icon: const Icon(Icons.close),
+                            onPressed: () => Navigator.pop(context),
+                          ),
+                        ],
+                      ),
+                      const Divider(),
 
-                      const SizedBox(height: AppStyles.paddingXL),
-
-                      // Mode de paiement
-                      Text('Mode de paiement', style: AppStyles.heading4),
-                      const SizedBox(height: AppStyles.paddingM),
-                      _buildModesPaiement(),
-
-                      const SizedBox(height: AppStyles.paddingXL),
-
-                      // Champs de montant selon le mode
-                      if (_modePaiement == AppConstants.paiementMixte)
-                        _buildPaiementMixte()
-                      else
-                        _buildPaiementSimple(),
-
-                      const SizedBox(height: AppStyles.paddingXL),
-
-                      // Rendu monnaie
-                      _buildRenduMonnaie(),
+                      // Aperçu PDF
+                      Expanded(
+                        child: PdfPreview(
+                          build: (format) => pdfBytes,
+                          canChangeOrientation: false,
+                          canChangePageFormat: false,
+                          canDebug: false,
+                          allowPrinting: true,
+                          allowSharing: true,
+                          pdfFileName: vente.numeroFacture,
+                        ),
+                      ),
                     ],
                   ),
                 ),
               ),
-            ),
-
-            // Footer avec boutons
-            _buildFooter(),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildHeader() {
-    return Container(
-      padding: const EdgeInsets.all(AppStyles.paddingL),
-      decoration: BoxDecoration(
-        color: AppColors.success,
-        borderRadius: const BorderRadius.only(
-          topLeft: Radius.circular(AppStyles.radiusM),
-          topRight: Radius.circular(AppStyles.radiusM),
-        ),
-      ),
-      child: Row(
-        children: [
-          Icon(Icons.payment, color: AppColors.textLight, size: 32),
-          const SizedBox(width: AppStyles.paddingM),
-          Expanded(
-            child: Text(
-              'Paiement',
-              style: AppStyles.heading2.copyWith(color: AppColors.textLight),
-            ),
-          ),
-          IconButton(
-            icon: Icon(Icons.close, color: AppColors.textLight),
-            onPressed: () => Navigator.of(context).pop(),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildRecapitulatif() {
-    return Consumer<VenteProvider>(
-      builder: (context, venteProvider, child) {
-        final afficherDetailTVA = venteProvider.genererFacture;
-
-        return Container(
-          padding: const EdgeInsets.all(AppStyles.paddingM),
-          decoration: BoxDecoration(
-            color: AppColors.background,
-            borderRadius: BorderRadius.circular(AppStyles.radiusM),
-          ),
-          child: Column(
-            children: [
-              _buildRecapRow('Articles', '${venteProvider.nombreArticles}'),
-
-              // Afficher détails uniquement pour facture
-              if (afficherDetailTVA) ...[
-                const Divider(),
-                _buildRecapRow(
-                  'Sous-total HT',
-                  Formatters.formatDevise(venteProvider.sousTotal),
-                ),
-                _buildRecapRow(
-                  'TVA',
-                  Formatters.formatDevise(venteProvider.totalTVA),
-                ),
-              ],
-
-              const Divider(),
-              _buildRecapRow(
-                afficherDetailTVA ? 'TOTAL TTC' : 'TOTAL À PAYER',
-                Formatters.formatDevise(venteProvider.totalTTC),
-                isTotal: true,
-              ),
-
-              // Info document
-              const Divider(),
-              Container(
-                padding: const EdgeInsets.all(AppStyles.paddingS),
-                decoration: BoxDecoration(
-                  color: (venteProvider.genererFacture
-                          ? AppColors.success
-                          : AppColors.info)
-                      .withOpacity(0.1),
-                  borderRadius: BorderRadius.circular(AppStyles.radiusS),
-                ),
-                child: Row(
-                  children: [
-                    Icon(
-                      venteProvider.genererFacture
-                          ? Icons.receipt_long
-                          : Icons.receipt,
-                      size: 16,
-                      color:
-                          venteProvider.genererFacture
-                              ? AppColors.success
-                              : AppColors.info,
-                    ),
-                    const SizedBox(width: AppStyles.paddingS),
-                    Expanded(
-                      child: Text(
-                        venteProvider.genererFacture
-                            ? 'Facture pour: ${venteProvider.clientSelectionne!.nomComplet}'
-                            : venteProvider.clientSelectionne != null
-                            ? 'Bon d\'achat avec points fidélité'
-                            : 'Bon d\'achat',
-                        style: AppStyles.labelSmall.copyWith(
-                          color:
-                              venteProvider.genererFacture
-                                  ? AppColors.success
-                                  : AppColors.info,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
+        );
+      }
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Erreur: $e'),
+            backgroundColor: AppColors.error,
           ),
         );
-      },
-    );
-  }
-
-  Widget _buildRecapRow(String label, String value, {bool isTotal = false}) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: AppStyles.paddingS),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Text(
-            label,
-            style: isTotal ? AppStyles.heading3 : AppStyles.bodyLarge,
-          ),
-          Text(
-            value,
-            style:
-                isTotal
-                    ? AppStyles.prixLarge.copyWith(fontSize: 24)
-                    : AppStyles.heading4,
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildModesPaiement() {
-    return Wrap(
-      spacing: AppStyles.paddingM,
-      runSpacing: AppStyles.paddingM,
-      children: [
-        _buildModePaiementChip(
-          AppConstants.paiementEspeces,
-          'Espèces',
-          Icons.payments,
-          AppColors.paiementEspeces,
-        ),
-        _buildModePaiementChip(
-          AppConstants.paiementCarte,
-          'Carte',
-          Icons.credit_card,
-          AppColors.paiementCarte,
-        ),
-        _buildModePaiementChip(
-          AppConstants.paiementCheque,
-          'Chèque',
-          Icons.receipt_long,
-          AppColors.paiementCheque,
-        ),
-        _buildModePaiementChip(
-          AppConstants.paiementMixte,
-          'Mixte',
-          Icons.auto_awesome_mosaic,
-          AppColors.warning,
-        ),
-      ],
-    );
-  }
-
-  Widget _buildModePaiementChip(
-    String mode,
-    String label,
-    IconData icon,
-    Color color,
-  ) {
-    final isSelected = _modePaiement == mode;
-
-    return ChoiceChip(
-      label: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: 20, color: isSelected ? AppColors.textLight : color),
-          const SizedBox(width: AppStyles.paddingS),
-          Text(label),
-        ],
-      ),
-      selected: isSelected,
-      onSelected: (_) => _onModePaiementChanged(mode),
-      selectedColor: color,
-      backgroundColor: color.withOpacity(0.1),
-      labelStyle: TextStyle(
-        color: isSelected ? AppColors.textLight : color,
-        fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-      ),
-    );
-  }
-
-  Widget _buildPaiementSimple() {
-    final venteProvider = context.read<VenteProvider>();
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text('Montant reçu', style: AppStyles.labelLarge),
-        const SizedBox(height: AppStyles.paddingS),
-        TextFormField(
-          controller: _montantController,
-          keyboardType: const TextInputType.numberWithOptions(decimal: true),
-          inputFormatters: [
-            FilteringTextInputFormatter.allow(RegExp(r'^\d+\.?\d{0,2}')),
-          ],
-          decoration: InputDecoration(
-            hintText: '0.00',
-            suffixText: AppConstants.deviseSymbole,
-            prefixIcon: const Icon(Icons.attach_money),
-          ),
-          validator:
-              (value) => Validators.validateMontant(
-                value,
-                min: venteProvider.totalTTC,
-              ),
-          onChanged: (_) => setState(() {}),
-        ),
-
-        const SizedBox(height: AppStyles.paddingM),
-
-        // Boutons montants rapides
-        Wrap(
-          spacing: AppStyles.paddingS,
-          runSpacing: AppStyles.paddingS,
-          children: [
-            _buildMontantRapideButton(500),
-            _buildMontantRapideButton(1000),
-            _buildMontantRapideButton(2000),
-            _buildMontantRapideButton(5000),
-            _buildMontantRapideButton(10000),
-          ],
-        ),
-      ],
-    );
-  }
-
-  Widget _buildMontantRapideButton(double montant) {
-    return OutlinedButton(
-      onPressed: () {
-        _montantController.text = montant.toString();
-        setState(() {});
-      },
-      child: Text(Formatters.formatDevise(montant)),
-    );
-  }
-
-  Widget _buildPaiementMixte() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text('Répartition du paiement', style: AppStyles.labelLarge),
-        const SizedBox(height: AppStyles.paddingM),
-
-        // Espèces
-        TextFormField(
-          controller: _montantEspecesController,
-          keyboardType: const TextInputType.numberWithOptions(decimal: true),
-          decoration: InputDecoration(
-            labelText: 'Espèces',
-            suffixText: AppConstants.deviseSymbole,
-            prefixIcon: Icon(Icons.payments, color: AppColors.paiementEspeces),
-          ),
-          onChanged: (_) => setState(() {}),
-        ),
-
-        const SizedBox(height: AppStyles.paddingM),
-
-        // Carte
-        TextFormField(
-          controller: _montantCarteController,
-          keyboardType: const TextInputType.numberWithOptions(decimal: true),
-          decoration: InputDecoration(
-            labelText: 'Carte',
-            suffixText: AppConstants.deviseSymbole,
-            prefixIcon: Icon(Icons.credit_card, color: AppColors.paiementCarte),
-          ),
-          onChanged: (_) => setState(() {}),
-        ),
-
-        const SizedBox(height: AppStyles.paddingM),
-
-        // Chèque
-        TextFormField(
-          controller: _montantChequeController,
-          keyboardType: const TextInputType.numberWithOptions(decimal: true),
-          decoration: InputDecoration(
-            labelText: 'Chèque',
-            suffixText: AppConstants.deviseSymbole,
-            prefixIcon: Icon(
-              Icons.receipt_long,
-              color: AppColors.paiementCheque,
-            ),
-          ),
-          onChanged: (_) => setState(() {}),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildRenduMonnaie() {
-    final venteProvider = context.read<VenteProvider>();
-    final total = venteProvider.totalTTC;
-
-    double montantPaye = 0;
-    if (_modePaiement == AppConstants.paiementMixte) {
-      montantPaye =
-          (double.tryParse(
-                _montantEspecesController.text.replaceAll(',', '.'),
-              ) ??
-              0) +
-          (double.tryParse(_montantCarteController.text.replaceAll(',', '.')) ??
-              0) +
-          (double.tryParse(
-                _montantChequeController.text.replaceAll(',', '.'),
-              ) ??
-              0);
-    } else {
-      montantPaye =
-          double.tryParse(_montantController.text.replaceAll(',', '.')) ?? 0;
+      }
     }
-
-    final rendu = montantPaye - total;
-
-    if (rendu <= 0) {
-      return const SizedBox.shrink();
-    }
-
-    return Container(
-      padding: const EdgeInsets.all(AppStyles.paddingL),
-      decoration: BoxDecoration(
-        color: AppColors.success.withOpacity(0.1),
-        borderRadius: BorderRadius.circular(AppStyles.radiusM),
-        border: Border.all(color: AppColors.success, width: 2),
-      ),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Row(
-            children: [
-              Icon(Icons.currency_exchange, color: AppColors.success, size: 32),
-              const SizedBox(width: AppStyles.paddingM),
-              Text(
-                'Monnaie à rendre',
-                style: AppStyles.heading4.copyWith(color: AppColors.success),
-              ),
-            ],
-          ),
-          Text(
-            Formatters.formatDevise(rendu),
-            style: AppStyles.prixLarge.copyWith(
-              color: AppColors.success,
-              fontSize: 28,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildFooter() {
-    return Container(
-      padding: const EdgeInsets.all(AppStyles.paddingL),
-      decoration: BoxDecoration(
-        color: AppColors.background,
-        border: Border(top: BorderSide(color: AppColors.border)),
-      ),
-      child: Row(
-        children: [
-          Expanded(
-            child: OutlinedButton(
-              onPressed:
-                  _isProcessing ? null : () => Navigator.of(context).pop(),
-              style: OutlinedButton.styleFrom(
-                padding: const EdgeInsets.symmetric(
-                  vertical: AppStyles.paddingM,
-                ),
-              ),
-              child: const Text('Annuler'),
-            ),
-          ),
-          const SizedBox(width: AppStyles.paddingM),
-          Expanded(
-            flex: 2,
-            child: ElevatedButton.icon(
-              onPressed: _isProcessing ? null : _validerPaiement,
-              icon:
-                  _isProcessing
-                      ? const SizedBox(
-                        width: 20,
-                        height: 20,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2,
-                          valueColor: AlwaysStoppedAnimation<Color>(
-                            Colors.white,
-                          ),
-                        ),
-                      )
-                      : const Icon(Icons.check),
-              label: Text(
-                _isProcessing ? 'Traitement...' : 'Valider le paiement',
-              ),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppColors.success,
-                padding: const EdgeInsets.symmetric(
-                  vertical: AppStyles.paddingM,
-                ),
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
   }
 }

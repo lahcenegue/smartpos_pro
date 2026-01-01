@@ -1,80 +1,81 @@
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
-import 'package:smartpos_pro/core/constants/app_constants.dart';
-import 'package:smartpos_pro/models/client.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:smartpos_pro/core/services/auth_service.dart';
 import '../../../core/constants/app_colors.dart';
 import '../../../core/constants/app_styles.dart';
 import '../../../core/utils/formatters.dart';
-import '../../../providers/vente_provider.dart';
+import '../../../models/ligne_vente.dart';
+import '../../../providers/vente/vente_providers.dart';
 import '../dialogs/paiement_dialog.dart';
-import '../../../core/services/auth_service.dart';
 
-/// Widget du panier
-class PanierWidget extends StatelessWidget {
+/// Widget du panier de vente
+class PanierWidget extends ConsumerWidget {
   const PanierWidget({super.key});
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final panier = ref.watch(panierProvider);
+    final totalTTC = ref.watch(totalTTCProvider);
+    final totalHT = ref.watch(totalHTProvider);
+    final totalTVA = ref.watch(totalTVAProvider);
+    final nombreArticles = ref.watch(nombreArticlesProvider);
+    final remiseGlobale = ref.watch(remiseGlobaleProvider);
+
     return Container(
-      color: AppColors.backgroundLight,
+      color: AppColors.surface,
       child: Column(
         children: [
-          // Header du panier
-          _buildHeader(context),
-
-          // Liste des articles
+          _buildHeader(context, ref, nombreArticles),
           Expanded(
-            child: Consumer<VenteProvider>(
-              builder: (context, venteProvider, child) {
-                if (venteProvider.panierVide) {
-                  return _buildPanierVide();
-                }
-
-                return _buildListePanier(venteProvider);
-              },
-            ),
+            child:
+                panier.isEmpty
+                    ? _buildPanierVide()
+                    : _buildListeArticles(context, ref, panier),
           ),
-
-          // Footer avec totaux et paiement
-          _buildFooter(context),
+          _buildTotaux(
+            context,
+            ref,
+            totalHT,
+            totalTVA,
+            totalTTC,
+            remiseGlobale,
+          ),
+          _buildFooter(context, ref, panier, totalTTC),
         ],
       ),
     );
   }
 
-  Widget _buildHeader(BuildContext context) {
+  Widget _buildHeader(BuildContext context, WidgetRef ref, int nombreArticles) {
     return Container(
       padding: const EdgeInsets.all(AppStyles.paddingM),
       decoration: BoxDecoration(
-        color: AppColors.vente,
-        boxShadow: AppStyles.shadowLight,
+        color: AppColors.primary,
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.1),
+            blurRadius: 4,
+            offset: const Offset(0, 2),
+          ),
+        ],
       ),
-      child: Consumer<VenteProvider>(
-        builder: (context, venteProvider, child) {
-          return Row(
-            children: [
-              const Icon(Icons.shopping_cart, color: AppColors.textLight),
-              const SizedBox(width: AppStyles.paddingM),
-              Expanded(
-                child: Text(
-                  'Panier (${venteProvider.nombreArticles} articles)',
-                  style: AppStyles.heading4.copyWith(
-                    color: AppColors.textLight,
-                  ),
-                ),
-              ),
-              if (!venteProvider.panierVide)
-                IconButton(
-                  icon: const Icon(
-                    Icons.delete_outline,
-                    color: AppColors.textLight,
-                  ),
-                  tooltip: 'Vider le panier',
-                  onPressed: () => _confirmerViderPanier(context),
-                ),
-            ],
-          );
-        },
+      child: Row(
+        children: [
+          const Icon(Icons.shopping_cart, color: AppColors.textLight, size: 24),
+          const SizedBox(width: AppStyles.paddingS),
+          Text(
+            'Panier ($nombreArticles article${nombreArticles > 1 ? 's' : ''})',
+            style: AppStyles.heading3.copyWith(color: AppColors.textLight),
+          ),
+          const Spacer(),
+          if (nombreArticles > 0)
+            IconButton(
+              icon: const Icon(Icons.delete_outline),
+              color: AppColors.textLight,
+              tooltip: 'Vider le panier',
+              onPressed: () => _viderPanier(context, ref),
+            ),
+        ],
       ),
     );
   }
@@ -96,9 +97,9 @@ class PanierWidget extends StatelessWidget {
           ),
           const SizedBox(height: AppStyles.paddingS),
           Text(
-            'Ajoutez des produits pour commencer',
+            'Scannez ou ajoutez des produits',
             style: AppStyles.bodyMedium.copyWith(
-              color: AppColors.textSecondary.withOpacity(0.7),
+              color: AppColors.textSecondary,
             ),
           ),
         ],
@@ -106,397 +107,287 @@ class PanierWidget extends StatelessWidget {
     );
   }
 
-  Widget _buildListePanier(VenteProvider venteProvider) {
-    return ListView.separated(
+  Widget _buildListeArticles(
+    BuildContext context,
+    WidgetRef ref,
+    List<LigneVente> panier,
+  ) {
+    return ListView.builder(
       padding: const EdgeInsets.all(AppStyles.paddingM),
-      itemCount: venteProvider.panier.length,
-      separatorBuilder: (context, index) => const Divider(height: 1),
+      itemCount: panier.length,
       itemBuilder: (context, index) {
-        final ligne = venteProvider.panier[index];
-
-        return Dismissible(
-          key: Key('ligne_$index'),
-          direction: DismissDirection.endToStart,
-          background: Container(
-            alignment: Alignment.centerRight,
-            padding: const EdgeInsets.only(right: AppStyles.paddingM),
-            color: AppColors.error,
-            child: const Icon(Icons.delete, color: Colors.white),
-          ),
-          onDismissed: (_) {
-            venteProvider.supprimerLigne(index);
-          },
-          child: Padding(
-            padding: const EdgeInsets.symmetric(vertical: AppStyles.paddingS),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                // Nom du produit
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        ligne.nomProduit,
-                        style: AppStyles.labelLarge,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                      const SizedBox(height: AppStyles.paddingXS),
-                      Text(
-                        Formatters.formatDevise(ligne.prixUnitaireTTC),
-                        style: AppStyles.bodySmall.copyWith(
-                          color: AppColors.textSecondary,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-
-                const SizedBox(width: AppStyles.paddingM),
-
-                // Contrôles de quantité
-                Container(
-                  decoration: BoxDecoration(
-                    border: Border.all(color: AppColors.border),
-                    borderRadius: BorderRadius.circular(AppStyles.radiusS),
-                  ),
-                  child: Row(
-                    children: [
-                      IconButton(
-                        icon: const Icon(Icons.remove, size: 16),
-                        onPressed: () => venteProvider.diminuerQuantite(index),
-                        padding: const EdgeInsets.all(4),
-                        constraints: const BoxConstraints(
-                          minWidth: 32,
-                          minHeight: 32,
-                        ),
-                      ),
-                      Container(
-                        constraints: const BoxConstraints(minWidth: 32),
-                        alignment: Alignment.center,
-                        child: Text(
-                          '${ligne.quantite.toInt()}',
-                          style: AppStyles.labelLarge,
-                        ),
-                      ),
-                      IconButton(
-                        icon: const Icon(Icons.add, size: 16),
-                        onPressed: () => venteProvider.augmenterQuantite(index),
-                        padding: const EdgeInsets.all(4),
-                        constraints: const BoxConstraints(
-                          minWidth: 32,
-                          minHeight: 32,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(width: AppStyles.paddingS),
-
-                // Bouton supprimer
-                IconButton(
-                  icon: const Icon(Icons.delete_outline, size: 20),
-                  color: AppColors.error,
-                  tooltip: 'Supprimer',
-                  onPressed: () {
-                    context.read<VenteProvider>().supprimerLigne(index);
-                  },
-                  padding: const EdgeInsets.all(4),
-                  constraints: const BoxConstraints(
-                    minWidth: 32,
-                    minHeight: 32,
-                  ),
-                ),
-
-                const SizedBox(width: AppStyles.paddingS),
-
-                // Total de la ligne
-                Text(
-                  Formatters.formatDevise(ligne.totalTTC),
-                  style: AppStyles.labelLarge.copyWith(
-                    fontWeight: FontWeight.bold,
-                  ),
-                  textAlign: TextAlign.right,
-                ),
-              ],
-            ),
-          ),
-        );
+        final ligne = panier[index];
+        return _buildLignePanier(context, ref, ligne, index);
       },
     );
   }
 
-  Widget _buildFooter(BuildContext context) {
-    return Container(
-      decoration: BoxDecoration(
-        color: AppColors.surface,
-        boxShadow: AppStyles.shadowMedium,
-      ),
-      child: Consumer<VenteProvider>(
-        builder: (context, venteProvider, child) {
-          // Afficher détails TVA si facture demandée
-          final afficherDetailTVA = venteProvider.genererFacture;
-
-          return Column(
-            children: [
-              // Totaux
-              Padding(
-                padding: const EdgeInsets.all(AppStyles.paddingM),
-                child: Column(
-                  children: [
-                    // Afficher HT et TVA uniquement si facture demandée
-                    if (afficherDetailTVA) ...[
-                      _buildTotalRow(
-                        'Sous-total HT',
-                        venteProvider.sousTotal,
-                        isSubtotal: true,
-                      ),
-                      const SizedBox(height: AppStyles.paddingS),
-                      _buildTotalRow(
-                        'TVA',
-                        venteProvider.totalTVA,
-                        isSubtotal: true,
-                      ),
-                      const Divider(height: AppStyles.paddingL),
-                    ],
-
-                    // Total TTC toujours affiché
-                    _buildTotalRow(
-                      afficherDetailTVA ? 'TOTAL TTC' : 'TOTAL',
-                      venteProvider.totalTTC,
-                      isTotal: true,
+  Widget _buildLignePanier(
+    BuildContext context,
+    WidgetRef ref,
+    LigneVente ligne,
+    int index,
+  ) {
+    return Card(
+      margin: const EdgeInsets.only(bottom: AppStyles.paddingS),
+      child: Padding(
+        padding: const EdgeInsets.all(AppStyles.paddingS),
+        child: Row(
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    ligne.nomProduit,
+                    style: AppStyles.labelMedium.copyWith(
+                      fontWeight: FontWeight.bold,
                     ),
-                  ],
-                ),
+                  ),
+                  Text(
+                    Formatters.formatDevise(ligne.prixUnitaireTTC),
+                    style: AppStyles.labelSmall.copyWith(
+                      color: AppColors.textSecondary,
+                    ),
+                  ),
+                ],
               ),
-
-              // Boutons d'action
-              Padding(
-                padding: const EdgeInsets.all(AppStyles.paddingM),
-                child: Column(
-                  children: [
-                    // Bouton sélectionner client (toujours visible)
-                    if (venteProvider.clientSelectionne == null)
-                      SizedBox(
-                        width: double.infinity,
-                        child: OutlinedButton.icon(
-                          onPressed: () => _selectionnerClient(context),
-                          icon: const Icon(Icons.person_add),
-                          label: const Text(
-                            'Ajouter un client (points fidélité)',
-                          ),
-                          style: OutlinedButton.styleFrom(
-                            foregroundColor: AppColors.primary,
-                            side: const BorderSide(color: AppColors.primary),
-                          ),
-                        ),
-                      )
-                    else
-                      Container(
-                        width: double.infinity,
-                        padding: const EdgeInsets.all(AppStyles.paddingM),
-                        decoration: BoxDecoration(
-                          color: AppColors.primary.withOpacity(0.1),
-                          borderRadius: BorderRadius.circular(
-                            AppStyles.radiusM,
-                          ),
-                          border: Border.all(color: AppColors.primary),
-                        ),
-                        child: Row(
-                          children: [
-                            Icon(Icons.person, color: AppColors.primary),
-                            const SizedBox(width: AppStyles.paddingS),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    venteProvider.clientSelectionne!.nomComplet,
-                                    style: AppStyles.labelLarge.copyWith(
-                                      fontWeight: FontWeight.bold,
-                                    ),
-                                  ),
-                                  Text(
-                                    'Points fidélité activés',
-                                    style: AppStyles.labelSmall.copyWith(
-                                      color: AppColors.textSecondary,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                            IconButton(
-                              icon: const Icon(Icons.close),
-                              onPressed: () {
-                                venteProvider.selectionnerClient(null);
-                                venteProvider.toggleFacture(false);
-                              },
-                            ),
-                          ],
-                        ),
-                      ),
-
-                    // Checkbox "Générer une facture" (visible seulement si client sélectionné)
-                    if (venteProvider.clientSelectionne != null) ...[
-                      const SizedBox(height: AppStyles.paddingM),
-                      Container(
-                        decoration: BoxDecoration(
-                          border: Border.all(color: AppColors.border),
-                          borderRadius: BorderRadius.circular(
-                            AppStyles.radiusM,
-                          ),
-                        ),
-                        child: CheckboxListTile(
-                          title: Row(
-                            children: [
-                              Icon(
-                                Icons.receipt_long,
-                                size: 20,
-                                color:
-                                    venteProvider.genererFacture
-                                        ? AppColors.success
-                                        : AppColors.textSecondary,
-                              ),
-                              const SizedBox(width: AppStyles.paddingS),
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text(
-                                      'Générer une facture',
-                                      style: AppStyles.labelMedium.copyWith(
-                                        fontWeight: FontWeight.w600,
-                                      ),
-                                    ),
-                                    Text(
-                                      'Avec détails TVA pour le client',
-                                      style: AppStyles.labelSmall.copyWith(
-                                        color: AppColors.textSecondary,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ],
-                          ),
-                          value: venteProvider.genererFacture,
-                          onChanged: (value) {
-                            venteProvider.toggleFacture(value ?? false);
-                          },
-                          activeColor: AppColors.success,
-                          controlAffinity: ListTileControlAffinity.leading,
-                        ),
-                      ),
-                    ],
-
-                    const SizedBox(height: AppStyles.paddingM),
-
-                    // Boutons remises (si panier non vide)
-                    if (!venteProvider.panierVide) ...[
-                      Row(
-                        children: [
-                          // Remise globale
-                          Expanded(
-                            child: OutlinedButton.icon(
-                              onPressed: () => _appliquerRemiseGlobale(context),
-                              icon: const Icon(Icons.discount, size: 18),
-                              label: Text(
-                                venteProvider.remiseGlobale > 0
-                                    ? 'Remise: ${Formatters.formatDevise(venteProvider.remiseGlobale)}'
-                                    : 'Remise globale',
-                                style: const TextStyle(fontSize: 12),
-                              ),
-                              style: OutlinedButton.styleFrom(
-                                foregroundColor:
-                                    venteProvider.remiseGlobale > 0
-                                        ? AppColors.success
-                                        : AppColors.textSecondary,
-                              ),
-                            ),
-                          ),
-
-                          const SizedBox(width: AppStyles.paddingS),
-
-                          // Annuler remise
-                          if (venteProvider.remiseGlobale > 0)
-                            IconButton(
-                              icon: const Icon(Icons.close, size: 18),
-                              tooltip: 'Annuler la remise',
-                              onPressed: () {
-                                venteProvider.appliquerRemiseGlobale(0);
-                              },
-                            ),
-                        ],
-                      ),
-
-                      const SizedBox(height: AppStyles.paddingM),
-                    ],
-
-                    // Bouton Payer
-                    SizedBox(
-                      width: double.infinity,
-                      height: 56,
-                      child: ElevatedButton.icon(
-                        onPressed:
-                            venteProvider.panierVide
-                                ? null
-                                : () => _ouvrirPaiement(context),
-                        icon: const Icon(Icons.payment),
-                        label: Text(
-                          venteProvider.genererFacture
-                              ? 'ÉMETTRE FACTURE'
-                              : 'PAYER',
-                        ),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: AppColors.success,
-                          foregroundColor: AppColors.textLight,
-                          textStyle: AppStyles.heading4,
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(
-                              AppStyles.radiusM,
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
-
-                    const SizedBox(height: AppStyles.paddingM),
-
-                    // Bouton Mettre en attente
-                    SizedBox(
-                      width: double.infinity,
-                      child: OutlinedButton.icon(
-                        onPressed:
-                            venteProvider.panierVide
-                                ? null
-                                : () => _mettreEnAttente(context),
-                        icon: const Icon(Icons.pending_actions),
-                        label: const Text('Mettre en attente'),
-                        style: OutlinedButton.styleFrom(
-                          foregroundColor: AppColors.warning,
-                          side: const BorderSide(color: AppColors.warning),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
+            ),
+            Container(
+              decoration: BoxDecoration(
+                color: AppColors.background,
+                borderRadius: BorderRadius.circular(AppStyles.radiusS),
               ),
-            ],
-          );
-        },
+              child: Row(
+                children: [
+                  IconButton(
+                    icon: const Icon(Icons.remove, size: 18),
+                    onPressed: () {
+                      ref
+                          .read(panierProvider.notifier)
+                          .modifierQuantite(index, ligne.quantite - 1);
+                    },
+                    padding: const EdgeInsets.all(4),
+                    constraints: const BoxConstraints(
+                      minWidth: 32,
+                      minHeight: 32,
+                    ),
+                  ),
+                  SizedBox(
+                    width: 40,
+                    child: Text(
+                      ligne.quantite.toInt().toString(),
+                      textAlign: TextAlign.center,
+                      style: AppStyles.labelMedium.copyWith(
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.add, size: 18),
+                    onPressed: () {
+                      ref
+                          .read(panierProvider.notifier)
+                          .modifierQuantite(index, ligne.quantite + 1);
+                    },
+                    padding: const EdgeInsets.all(4),
+                    constraints: const BoxConstraints(
+                      minWidth: 32,
+                      minHeight: 32,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: AppStyles.paddingS),
+            IconButton(
+              icon: const Icon(Icons.delete_outline, size: 20),
+              color: AppColors.error,
+              tooltip: 'Supprimer',
+              onPressed: () {
+                ref.read(panierProvider.notifier).supprimerLigne(index);
+              },
+              padding: const EdgeInsets.all(4),
+              constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+            ),
+            const SizedBox(width: AppStyles.paddingS),
+            Text(
+              Formatters.formatDevise(ligne.totalTTC),
+              style: AppStyles.prixMedium,
+            ),
+          ],
+        ),
       ),
     );
   }
 
-  void _appliquerRemiseGlobale(BuildContext context) {
-    final venteProvider = context.read<VenteProvider>();
+  // ==================== TOTAUX ====================
+
+  Widget _buildTotaux(
+    BuildContext context,
+    WidgetRef ref,
+    double totalHT,
+    double totalTVA,
+    double totalTTC,
+    double remiseGlobale,
+  ) {
+    return Container(
+      padding: const EdgeInsets.all(AppStyles.paddingM),
+      decoration: BoxDecoration(
+        color: AppColors.background,
+        border: Border(top: BorderSide(color: AppColors.border)),
+      ),
+      child: Column(
+        children: [
+          // ❌ SUPPRIMER l'affichage de HT et TVA ici
+          // On n'affiche QUE le total TTC
+
+          // Remise globale
+          if (remiseGlobale > 0) ...[
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Row(
+                  children: [
+                    Text(
+                      'Remise globale',
+                      style: AppStyles.labelMedium.copyWith(
+                        color: AppColors.success,
+                      ),
+                    ),
+                    const SizedBox(width: AppStyles.paddingS),
+                    IconButton(
+                      icon: const Icon(Icons.close, size: 16),
+                      color: AppColors.error,
+                      tooltip: 'Annuler la remise',
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints(
+                        minWidth: 24,
+                        minHeight: 24,
+                      ),
+                      onPressed: () {
+                        ref.read(remiseGlobaleProvider.notifier).annuler();
+                      },
+                    ),
+                  ],
+                ),
+                Text(
+                  '- ${Formatters.formatDevise(remiseGlobale)}',
+                  style: AppStyles.labelMedium.copyWith(
+                    color: AppColors.success,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: AppStyles.paddingS),
+          ],
+
+          // Bouton Remise
+          if (ref.watch(panierProvider).isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(bottom: AppStyles.paddingM),
+              child: SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  onPressed: () => _appliquerRemiseGlobale(context, ref),
+                  icon: const Icon(Icons.discount, size: 18),
+                  label: const Text('Remise globale'),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: AppColors.success,
+                  ),
+                ),
+              ),
+            ),
+
+          const Divider(height: AppStyles.paddingL),
+
+          // ✅ UNIQUEMENT le Total TTC (sans HT ni TVA)
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text('TOTAL', style: AppStyles.heading2),
+              Text(
+                Formatters.formatDevise(totalTTC),
+                style: AppStyles.prixLarge.copyWith(color: AppColors.primary),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ==================== FOOTER ====================
+
+  Widget _buildFooter(
+    BuildContext context,
+    WidgetRef ref,
+    List<LigneVente> panier,
+    double totalTTC,
+  ) {
+    return Container(
+      padding: const EdgeInsets.all(AppStyles.paddingL),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.1),
+            blurRadius: 4,
+            offset: const Offset(0, -2),
+          ),
+        ],
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: OutlinedButton(
+              onPressed:
+                  panier.isEmpty ? null : () => _mettreEnAttente(context, ref),
+              style: OutlinedButton.styleFrom(
+                padding: const EdgeInsets.symmetric(
+                  vertical: AppStyles.paddingM,
+                ),
+              ),
+              child: const Text('Mettre en attente'),
+            ),
+          ),
+          const SizedBox(width: AppStyles.paddingM),
+          Expanded(
+            flex: 2,
+            child: ElevatedButton(
+              onPressed: panier.isEmpty ? null : () => _ouvrirPaiement(context),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.success,
+                padding: const EdgeInsets.symmetric(
+                  vertical: AppStyles.paddingM,
+                ),
+              ),
+              child: const Text(
+                'PAYER',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ==================== ACTIONS ====================
+
+  void _appliquerRemiseGlobale(BuildContext context, WidgetRef ref) {
+    final totalAvantRemise =
+        ref.read(totalHTProvider) +
+        ref.read(totalTVAProvider) +
+        ref.read(remiseGlobaleProvider);
+
     final remiseController = TextEditingController();
 
     showDialog(
       context: context,
       builder: (context) {
-        String typeRemise = 'montant'; // 'montant' ou 'pourcentage'
+        String typeRemise = 'montant';
 
         return StatefulBuilder(
           builder:
@@ -506,13 +397,10 @@ class PanierWidget extends StatelessWidget {
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Text(
-                      'Total avant remise: ${Formatters.formatDevise(venteProvider.totalAvantRemise)}',
+                      'Total avant remise: ${Formatters.formatDevise(totalAvantRemise)}',
                       style: AppStyles.labelLarge,
                     ),
-
                     const SizedBox(height: AppStyles.paddingL),
-
-                    // Type de remise
                     SegmentedButton<String>(
                       segments: const [
                         ButtonSegment(
@@ -533,10 +421,7 @@ class PanierWidget extends StatelessWidget {
                         });
                       },
                     ),
-
                     const SizedBox(height: AppStyles.paddingM),
-
-                    // Champ montant/pourcentage
                     TextField(
                       controller: remiseController,
                       keyboardType: const TextInputType.numberWithOptions(
@@ -547,10 +432,7 @@ class PanierWidget extends StatelessWidget {
                             typeRemise == 'montant'
                                 ? 'Montant de la remise'
                                 : 'Pourcentage',
-                        suffixText:
-                            typeRemise == 'montant'
-                                ? AppConstants.deviseSymbole
-                                : '%',
+                        suffixText: typeRemise == 'montant' ? 'DA' : '%',
                         border: const OutlineInputBorder(),
                       ),
                       autofocus: true,
@@ -560,7 +442,7 @@ class PanierWidget extends StatelessWidget {
                 actions: [
                   TextButton(
                     onPressed: () {
-                      remiseController.dispose(); // ← ICI c'est OK
+                      remiseController.dispose();
                       Navigator.pop(context);
                     },
                     child: const Text('Annuler'),
@@ -594,10 +476,9 @@ class PanierWidget extends StatelessWidget {
                           );
                           return;
                         }
-                        remiseMontant =
-                            venteProvider.totalAvantRemise * (valeur / 100);
+                        remiseMontant = totalAvantRemise * (valeur / 100);
                       } else {
-                        if (valeur > venteProvider.totalAvantRemise) {
+                        if (valeur > totalAvantRemise) {
                           ScaffoldMessenger.of(context).showSnackBar(
                             const SnackBar(
                               content: Text(
@@ -611,8 +492,10 @@ class PanierWidget extends StatelessWidget {
                         remiseMontant = valeur;
                       }
 
-                      venteProvider.appliquerRemiseGlobale(remiseMontant);
-                      remiseController.dispose(); // ← ICI c'est OK aussi
+                      ref
+                          .read(remiseGlobaleProvider.notifier)
+                          .appliquer(remiseMontant);
+                      remiseController.dispose();
                       Navigator.pop(context);
                     },
                     style: ElevatedButton.styleFrom(
@@ -627,82 +510,7 @@ class PanierWidget extends StatelessWidget {
     );
   }
 
-  Widget _buildTotalRow(
-    String label,
-    double montant, {
-    bool isSubtotal = false,
-    bool isTotal = false,
-  }) {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-      children: [
-        Text(
-          label,
-          style:
-              isTotal
-                  ? AppStyles.heading3
-                  : AppStyles.bodyLarge.copyWith(
-                    color:
-                        isSubtotal
-                            ? AppColors.textSecondary
-                            : AppColors.textPrimary,
-                  ),
-        ),
-        Text(
-          Formatters.formatDevise(montant),
-          style:
-              isTotal
-                  ? AppStyles.prixLarge
-                  : AppStyles.heading4.copyWith(
-                    color:
-                        isSubtotal
-                            ? AppColors.textSecondary
-                            : AppColors.textPrimary,
-                  ),
-        ),
-      ],
-    );
-  }
-
-  void _selectionnerClient(BuildContext context) {
-    // TODO: Implémenter la sélection de client
-    // Pour l'instant, on simule avec un dialog simple
-    showDialog(
-      context: context,
-      builder:
-          (context) => AlertDialog(
-            title: const Text('Sélectionner un client'),
-            content: const Text(
-              'La sélection de client sera disponible après '
-              'l\'implémentation du module Clients.\n\n'
-              'Pour tester, nous allons créer un client temporaire.',
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(context),
-                child: const Text('Annuler'),
-              ),
-              ElevatedButton(
-                onPressed: () {
-                  // Créer un client temporaire pour test
-                  final clientTemp = Client(
-                    id: 1,
-                    codeClient: 'CLI-00001',
-                    nom: 'Client',
-                    prenom: 'Test',
-                    typeClient: 'professionnel',
-                  );
-                  context.read<VenteProvider>().selectionnerClient(clientTemp);
-                  Navigator.pop(context);
-                },
-                child: const Text('Client Test'),
-              ),
-            ],
-          ),
-    );
-  }
-
-  void _confirmerViderPanier(BuildContext context) {
+  void _viderPanier(BuildContext context, WidgetRef ref) {
     showDialog(
       context: context,
       builder:
@@ -716,7 +524,7 @@ class PanierWidget extends StatelessWidget {
               ),
               ElevatedButton(
                 onPressed: () {
-                  context.read<VenteProvider>().viderPanier();
+                  ref.read(panierProvider.notifier).vider();
                   Navigator.pop(context);
                 },
                 style: ElevatedButton.styleFrom(
@@ -729,36 +537,105 @@ class PanierWidget extends StatelessWidget {
     );
   }
 
-  void _ouvrirPaiement(BuildContext context) {
-    showDialog(context: context, builder: (context) => const PaiementDialog());
+  void _mettreEnAttente(BuildContext context, WidgetRef ref) {
+    final panier = ref.read(panierProvider);
+
+    if (panier.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Le panier est vide'),
+          backgroundColor: AppColors.error,
+        ),
+      );
+      return;
+    }
+
+    showDialog(
+      context: context,
+      builder: (context) {
+        final notesController = TextEditingController();
+
+        return AlertDialog(
+          title: const Text('Mettre en attente'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Cette vente sera mise en attente et pourra être reprise plus tard.',
+                style: AppStyles.bodyMedium,
+              ),
+              const SizedBox(height: AppStyles.paddingM),
+              TextField(
+                controller: notesController,
+                decoration: const InputDecoration(
+                  labelText: 'Notes (optionnel)',
+                  hintText: 'Ex: Client au téléphone',
+                  border: OutlineInputBorder(),
+                ),
+                maxLines: 2,
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () {
+                notesController.dispose();
+                Navigator.pop(context);
+              },
+              child: const Text('Annuler'),
+            ),
+            ElevatedButton(
+              onPressed: () async {
+                try {
+                  final userId = AuthService.instance.currentUser?.id ?? 1;
+
+                  await ref
+                      .read(venteAttenteProvider.notifier)
+                      .mettreEnAttente(
+                        utilisateurId: userId,
+                        notes:
+                            notesController.text.trim().isEmpty
+                                ? null
+                                : notesController.text.trim(),
+                      );
+
+                  notesController.dispose();
+
+                  if (context.mounted) {
+                    Navigator.pop(context);
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('Vente mise en attente'),
+                        backgroundColor: AppColors.success,
+                      ),
+                    );
+                  }
+                } catch (e) {
+                  notesController.dispose();
+                  if (context.mounted) {
+                    Navigator.pop(context);
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text('Erreur: $e'),
+                        backgroundColor: AppColors.error,
+                      ),
+                    );
+                  }
+                }
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.warning,
+              ),
+              child: const Text('Mettre en attente'),
+            ),
+          ],
+        );
+      },
+    );
   }
 
-  void _mettreEnAttente(BuildContext context) async {
-    try {
-      final venteProvider = context.read<VenteProvider>();
-      final authService = AuthService.instance;
-
-      await venteProvider.mettreEnAttente(
-        utilisateurId: authService.currentUser?.id,
-      );
-
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Vente mise en attente'),
-            backgroundColor: AppColors.success,
-          ),
-        );
-      }
-    } catch (e) {
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Erreur: $e'),
-            backgroundColor: AppColors.error,
-          ),
-        );
-      }
-    }
+  void _ouvrirPaiement(BuildContext context) {
+    showDialog(context: context, builder: (context) => const PaiementDialog());
   }
 }

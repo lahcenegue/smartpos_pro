@@ -1,30 +1,30 @@
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:smartpos_pro/core/utils/formatters.dart';
 import '../../core/constants/app_colors.dart';
 import '../../core/constants/app_styles.dart';
-import '../../providers/vente_provider.dart';
+import '../../providers/vente/vente_providers.dart';
+import '../../repositories/produit_repository.dart';
 import '../../models/produit.dart';
+import 'widgets/panier_widget.dart';
+import 'widgets/stats_temps_reel_widget.dart';
 import 'dialogs/ventes_attente_dialog.dart';
 import 'dialogs/historique_ventes_dialog.dart';
-import 'widgets/produit_grid.dart';
-import 'widgets/panier_widget.dart';
-import 'widgets/search_bar_widget.dart';
-import 'widgets/categorie_chips.dart';
-import 'widgets/stats_temps_reel_widget.dart';
 
-/// Écran principal de vente (caisse)
-class VenteScreen extends StatefulWidget {
+class VenteScreen extends ConsumerStatefulWidget {
   const VenteScreen({super.key});
 
   @override
-  State<VenteScreen> createState() => _VenteScreenState();
+  ConsumerState<VenteScreen> createState() => _VenteScreenState();
 }
 
-class _VenteScreenState extends State<VenteScreen> {
+class _VenteScreenState extends ConsumerState<VenteScreen> {
+  final ProduitRepository _produitRepo = ProduitRepository();
   final TextEditingController _searchController = TextEditingController();
-  int? _categorieSelectionnee;
+
   List<Produit> _produits = [];
-  bool _isLoading = false;
+  List<Produit> _produitsAffiches = [];
+  bool _isLoading = true;
 
   @override
   void initState() {
@@ -38,117 +38,42 @@ class _VenteScreenState extends State<VenteScreen> {
     super.dispose();
   }
 
-  /// Charger tous les produits
   Future<void> _chargerProduits() async {
     setState(() => _isLoading = true);
-
     try {
-      final venteProvider = context.read<VenteProvider>();
-      final produits = await venteProvider.rechercherProduits('');
-
-      if (mounted) {
-        setState(() {
-          _produits = produits;
-          _isLoading = false;
-        });
-      }
+      final produits = await _produitRepo.getTousProduits();
+      setState(() {
+        _produits = produits;
+        _produitsAffiches = produits;
+        _isLoading = false;
+      });
     } catch (e) {
-      if (mounted) {
-        setState(() => _isLoading = false);
-        _showError('Erreur lors du chargement des produits: $e');
-      }
-    }
-  }
-
-  /// Rechercher des produits
-  Future<void> _rechercherProduits(String query) async {
-    if (query.isEmpty) {
-      _chargerProduits();
-      return;
-    }
-
-    setState(() => _isLoading = true);
-
-    try {
-      final venteProvider = context.read<VenteProvider>();
-      final produits = await venteProvider.rechercherProduits(query);
-
-      if (mounted) {
-        setState(() {
-          _produits = produits;
-          _isLoading = false;
-        });
-      }
-    } catch (e) {
-      if (mounted) {
-        setState(() => _isLoading = false);
-        _showError('Erreur lors de la recherche: $e');
-      }
-    }
-  }
-
-  /// Filtrer par catégorie
-  Future<void> _filtrerParCategorie(int? categorieId) async {
-    setState(() {
-      _categorieSelectionnee = categorieId;
-      _isLoading = true;
-    });
-
-    try {
-      final venteProvider = context.read<VenteProvider>();
-
-      List<Produit> produits;
-      if (categorieId == null) {
-        produits = await venteProvider.rechercherProduits('');
-      } else {
-        produits = await venteProvider.getProduitsByCategorie(categorieId);
-      }
-
-      if (mounted) {
-        setState(() {
-          _produits = produits;
-          _isLoading = false;
-        });
-      }
-    } catch (e) {
-      if (mounted) {
-        setState(() => _isLoading = false);
-        _showError('Erreur lors du filtrage: $e');
-      }
-    }
-  }
-
-  /// Ajouter un produit au panier
-  Future<void> _ajouterAuPanier(Produit produit) async {
-    try {
-      final venteProvider = context.read<VenteProvider>();
-      await venteProvider.ajouterProduit(produit);
-
+      setState(() => _isLoading = false);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('${produit.nom} ajouté au panier'),
-            duration: const Duration(seconds: 1),
-            backgroundColor: AppColors.success,
+            content: Text('Erreur: $e'),
+            backgroundColor: AppColors.error,
           ),
         );
-      }
-    } catch (e) {
-      if (mounted) {
-        _showError(e.toString());
       }
     }
   }
 
-  /// Afficher une erreur
-  void _showError(String message) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(message),
-        backgroundColor: AppColors.error,
-        duration: const Duration(seconds: 3),
-      ),
-    );
+  void _rechercherProduits(String query) {
+    if (query.isEmpty) {
+      setState(() => _produitsAffiches = _produits);
+      return;
+    }
+
+    setState(() {
+      _produitsAffiches =
+          _produits.where((p) {
+            return p.nom.toLowerCase().contains(query.toLowerCase()) ||
+                (p.codeBarre?.toLowerCase().contains(query.toLowerCase()) ??
+                    false);
+          }).toList();
+    });
   }
 
   @override
@@ -156,10 +81,7 @@ class _VenteScreenState extends State<VenteScreen> {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Caisse'),
-        backgroundColor: AppColors.vente,
-        foregroundColor: AppColors.textLight,
         actions: [
-          // Bouton ventes en attente
           IconButton(
             icon: const Icon(Icons.pending_actions),
             tooltip: 'Ventes en attente',
@@ -170,8 +92,6 @@ class _VenteScreenState extends State<VenteScreen> {
               );
             },
           ),
-
-          // Bouton historique
           IconButton(
             icon: const Icon(Icons.history),
             tooltip: 'Historique',
@@ -182,74 +102,203 @@ class _VenteScreenState extends State<VenteScreen> {
               );
             },
           ),
-
-          const SizedBox(width: AppStyles.paddingS),
         ],
       ),
       body: Row(
         children: [
-          // Partie gauche : Sélection des produits (60%)
+          // Partie gauche - Produits (60%)
           Expanded(
             flex: 6,
-            child: Container(
-              color: AppColors.background,
-              child: Column(
-                children: [
-                  // Stats temps réel ← AJOUTER
-                  Padding(
-                    padding: const EdgeInsets.all(AppStyles.paddingM),
-                    child: const StatsTempsReelWidget(),
-                  ),
+            child: Column(
+              children: [
+                // Stats temps réel
+                Padding(
+                  padding: const EdgeInsets.all(AppStyles.paddingM),
+                  child: const StatsTempsReelWidget(),
+                ),
 
-                  // Barre de recherche
-                  SearchBarWidget(
+                // Barre de recherche
+                Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: AppStyles.paddingM,
+                  ),
+                  child: TextField(
                     controller: _searchController,
-                    onSearch: _rechercherProduits,
-                    onScan: (codeBarre) async {
-                      // Scanner un code-barres
-                      try {
-                        final venteProvider = context.read<VenteProvider>();
-                        final produit = await venteProvider
-                            .rechercherProduitParCodeBarre(codeBarre);
-
-                        if (produit != null) {
-                          await _ajouterAuPanier(produit);
-                        } else {
-                          _showError('Produit non trouvé');
-                        }
-                      } catch (e) {
-                        _showError(e.toString());
-                      }
-                    },
+                    decoration: InputDecoration(
+                      hintText: 'Rechercher un produit...',
+                      prefixIcon: const Icon(Icons.search),
+                      suffixIcon:
+                          _searchController.text.isNotEmpty
+                              ? IconButton(
+                                icon: const Icon(Icons.clear),
+                                onPressed: () {
+                                  _searchController.clear();
+                                  _rechercherProduits('');
+                                },
+                              )
+                              : null,
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(AppStyles.radiusM),
+                      ),
+                    ),
+                    onChanged: _rechercherProduits,
                   ),
+                ),
 
-                  // Chips de catégories
-                  CategorieChips(
-                    categorieSelectionnee: _categorieSelectionnee,
-                    onCategorieSelected: _filtrerParCategorie,
-                  ),
+                const SizedBox(height: AppStyles.paddingM),
 
-                  // Grille de produits
-                  Expanded(
-                    child:
-                        _isLoading
-                            ? const Center(child: CircularProgressIndicator())
-                            : ProduitGrid(
-                              produits: _produits,
-                              onProduitTap: _ajouterAuPanier,
+                // Grille de produits
+                Expanded(
+                  child:
+                      _isLoading
+                          ? const Center(child: CircularProgressIndicator())
+                          : _produitsAffiches.isEmpty
+                          ? Center(
+                            child: Text(
+                              'Aucun produit trouvé',
+                              style: AppStyles.bodyLarge.copyWith(
+                                color: AppColors.textSecondary,
+                              ),
                             ),
-                  ),
-                ],
-              ),
+                          )
+                          : GridView.builder(
+                            padding: const EdgeInsets.all(AppStyles.paddingM),
+                            gridDelegate:
+                                const SliverGridDelegateWithFixedCrossAxisCount(
+                                  crossAxisCount: 4,
+                                  childAspectRatio: 0.75,
+                                  crossAxisSpacing: AppStyles.paddingM,
+                                  mainAxisSpacing: AppStyles.paddingM,
+                                ),
+                            itemCount: _produitsAffiches.length,
+                            itemBuilder: (context, index) {
+                              final produit = _produitsAffiches[index];
+                              return _buildProduitCard(produit);
+                            },
+                          ),
+                ),
+              ],
             ),
           ),
 
-          // Séparateur vertical
-          Container(width: 1, color: AppColors.border),
-
-          // Partie droite : Panier (40%)
-          Expanded(flex: 4, child: PanierWidget()),
+          // Partie droite - Panier (40%)
+          const Expanded(flex: 4, child: PanierWidget()),
         ],
+      ),
+    );
+  }
+
+  Widget _buildProduitCard(Produit produit) {
+    final enRupture = produit.stock <= 0;
+
+    return Card(
+      elevation: 2,
+      child: InkWell(
+        onTap:
+            enRupture
+                ? null
+                : () async {
+                  try {
+                    ref.read(panierProvider.notifier).ajouterProduit(produit);
+
+                    if (mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: Text('${produit.nom} ajouté au panier'),
+                          backgroundColor: AppColors.success,
+                          duration: const Duration(seconds: 1),
+                          behavior: SnackBarBehavior.floating,
+                          margin: const EdgeInsets.only(
+                            bottom: 80,
+                            left: 16,
+                            right: 16,
+                          ),
+                        ),
+                      );
+                    }
+                  } catch (e) {
+                    if (mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: Text(
+                            e.toString().replaceAll('Exception: ', ''),
+                          ),
+                          backgroundColor: AppColors.error,
+                          duration: const Duration(seconds: 3),
+                          behavior: SnackBarBehavior.floating,
+                          margin: const EdgeInsets.only(
+                            bottom: 80,
+                            left: 16,
+                            right: 16,
+                          ),
+                        ),
+                      );
+                    }
+                  }
+                },
+        child: Padding(
+          padding: const EdgeInsets.all(AppStyles.paddingS),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Image placeholder
+              Expanded(
+                child: Container(
+                  decoration: BoxDecoration(
+                    color: AppColors.background,
+                    borderRadius: BorderRadius.circular(AppStyles.radiusS),
+                  ),
+                  child: Center(
+                    child: Icon(
+                      Icons.inventory_2_outlined,
+                      size: 48,
+                      color: AppColors.textSecondary.withOpacity(0.3),
+                    ),
+                  ),
+                ),
+              ),
+
+              const SizedBox(height: AppStyles.paddingS),
+
+              // Nom du produit
+              Text(
+                produit.nom,
+                style: AppStyles.labelMedium.copyWith(
+                  fontWeight: FontWeight.bold,
+                ),
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+              ),
+
+              const SizedBox(height: 4),
+
+              // Prix
+              Text(
+                Formatters.formatDevise(produit.prixVente),
+                style: AppStyles.prixMedium,
+              ),
+
+              // Stock
+              Row(
+                children: [
+                  Icon(
+                    enRupture ? Icons.warning : Icons.check_circle,
+                    size: 16,
+                    color: enRupture ? AppColors.error : AppColors.success,
+                  ),
+                  const SizedBox(width: 4),
+                  Text(
+                    enRupture ? 'Rupture' : 'Stock: ${produit.stock}',
+                    style: AppStyles.labelSmall.copyWith(
+                      color:
+                          enRupture ? AppColors.error : AppColors.textSecondary,
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }

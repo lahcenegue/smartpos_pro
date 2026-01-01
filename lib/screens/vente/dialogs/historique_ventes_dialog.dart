@@ -1,383 +1,290 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/constants/app_colors.dart';
 import '../../../core/constants/app_styles.dart';
 import '../../../core/utils/formatters.dart';
-import '../../../core/services/print_service.dart';
-import '../../../core/services/auth_service.dart';
-import '../../../repositories/vente_repository.dart';
+import '../../../providers/vente/vente_providers.dart';
 import '../../../models/vente.dart';
+import 'detail_vente_dialog.dart';
 
-/// Dialog pour afficher l'historique des ventes
-class HistoriqueVentesDialog extends StatefulWidget {
+class HistoriqueVentesDialog extends ConsumerStatefulWidget {
   const HistoriqueVentesDialog({super.key});
 
   @override
-  State<HistoriqueVentesDialog> createState() => _HistoriqueVentesDialogState();
+  ConsumerState<HistoriqueVentesDialog> createState() =>
+      _HistoriqueVentesDialogState();
 }
 
-class _HistoriqueVentesDialogState extends State<HistoriqueVentesDialog> {
-  final VenteRepository _venteRepo = VenteRepository();
-  List<Vente> _ventes = [];
-  bool _isLoading = true;
-
-  // Filtres
+class _HistoriqueVentesDialogState
+    extends ConsumerState<HistoriqueVentesDialog> {
   DateTime? _dateDebut;
   DateTime? _dateFin;
-  String _filtreStatut = 'tous'; // 'tous', 'terminee', 'annulee'
+  String _statutFiltre = 'tous';
 
   @override
   void initState() {
     super.initState();
-    // Par défaut : ventes du jour
-    _dateDebut = DateTime.now().copyWith(hour: 0, minute: 0, second: 0);
-    _dateFin = DateTime.now().copyWith(hour: 23, minute: 59, second: 59);
-    _chargerVentes();
-  }
-
-  /// Formater une date simplement
-  String _formatDate(DateTime date) {
-    return '${date.day.toString().padLeft(2, '0')}/${date.month.toString().padLeft(2, '0')}/${date.year} ${date.hour.toString().padLeft(2, '0')}:${date.minute.toString().padLeft(2, '0')}';
-  }
-
-  Future<void> _chargerVentes() async {
-    setState(() => _isLoading = true);
-
-    try {
-      List<Vente> ventes;
-
-      if (_dateDebut != null && _dateFin != null) {
-        ventes = await _venteRepo.getVentesParPeriode(_dateDebut!, _dateFin!);
-      } else {
-        ventes = await _venteRepo.getToutesVentes(limit: 50);
-      }
-
-      // Filtrer par statut si nécessaire
-      if (_filtreStatut != 'tous') {
-        ventes = ventes.where((v) => v.statut == _filtreStatut).toList();
-      }
-
-      if (mounted) {
-        setState(() {
-          _ventes = ventes;
-          _isLoading = false;
-        });
-      }
-    } catch (e) {
-      if (mounted) {
-        setState(() => _isLoading = false);
-        _showError('Erreur lors du chargement: $e');
-      }
-    }
-  }
-
-  Future<void> _reimprimer(Vente vente) async {
-    try {
-      if (vente.estFacture) {
-        await PrintService.instance.imprimerFacture(vente);
-      } else {
-        await PrintService.instance.imprimerTicket(vente);
-      }
-
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              '${vente.estFacture ? "Facture" : "Ticket"} réimprimé',
-            ),
-            backgroundColor: AppColors.success,
-          ),
-        );
-      }
-    } catch (e) {
-      if (mounted) {
-        _showError('Erreur d\'impression: $e');
-      }
-    }
-  }
-
-  Future<void> _annulerVente(Vente vente) async {
-    // Demander le motif
-    final motifController = TextEditingController();
-
-    final confirme = await showDialog<bool>(
-      context: context,
-      builder:
-          (context) => AlertDialog(
-            title: const Text('Annuler la vente'),
-            content: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Vente: ${vente.numeroFacture}',
-                  style: AppStyles.labelLarge.copyWith(
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-                Text('Montant: ${Formatters.formatDevise(vente.montantTTC)}'),
-                const SizedBox(height: AppStyles.paddingL),
-                const Text(
-                  '⚠️ Cette action est irréversible !',
-                  style: TextStyle(color: AppColors.error),
-                ),
-                const SizedBox(height: AppStyles.paddingM),
-                TextField(
-                  controller: motifController,
-                  decoration: const InputDecoration(
-                    labelText: 'Motif d\'annulation *',
-                    hintText: 'Ex: Erreur de caisse, retour client...',
-                    border: OutlineInputBorder(),
-                  ),
-                  maxLines: 3,
-                ),
-              ],
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(context, false),
-                child: const Text('Fermer'),
-              ),
-              ElevatedButton(
-                onPressed: () {
-                  if (motifController.text.trim().isEmpty) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                        content: Text('Veuillez indiquer un motif'),
-                        backgroundColor: AppColors.error,
-                      ),
-                    );
-                  } else {
-                    Navigator.pop(context, true);
-                  }
-                },
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppColors.error,
-                ),
-                child: const Text('Annuler la vente'),
-              ),
-            ],
-          ),
-    );
-
-    if (confirme == true) {
-      try {
-        final authService = AuthService.instance;
-        await _venteRepo.annulerVente(
-          vente.id!,
-          motifController.text.trim(),
-          authService.currentUser?.id ?? 1,
-        );
-
-        _chargerVentes();
-
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('Vente ${vente.numeroFacture} annulée'),
-              backgroundColor: AppColors.success,
-            ),
-          );
-        }
-      } catch (e) {
-        if (mounted) {
-          _showError('Erreur lors de l\'annulation: $e');
-        }
-      }
-    }
-
-    motifController.dispose();
-  }
-
-  void _showError(String message) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message), backgroundColor: AppColors.error),
-    );
-  }
-
-  Future<void> _selectionnerPeriode() async {
-    final resultat = await showDialog<Map<String, DateTime?>>(
-      context: context,
-      builder:
-          (context) => _PeriodeDialog(dateDebut: _dateDebut, dateFin: _dateFin),
-    );
-
-    if (resultat != null) {
-      setState(() {
-        _dateDebut = resultat['debut'];
-        _dateFin = resultat['fin'];
-      });
-      _chargerVentes();
-    }
+    // Par défaut : derniers 7 jours
+    final maintenant = DateTime.now();
+    _dateFin = maintenant;
+    _dateDebut = maintenant.subtract(const Duration(days: 7));
   }
 
   @override
   Widget build(BuildContext context) {
+    final historiqueProvider = historiqueVentesProvider(
+      dateDebut: _dateDebut,
+      dateFin: _dateFin,
+      statut: _statutFiltre,
+    );
+
+    final ventesAsync = ref.watch(historiqueProvider);
+
     return Dialog(
-      child: SizedBox(
-        width: 900,
+      child: Container(
+        width: 1000,
         height: 700,
+        padding: const EdgeInsets.all(AppStyles.paddingL),
         child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             // Header
-            _buildHeader(),
+            Row(
+              children: [
+                const Icon(Icons.history, color: AppColors.primary),
+                const SizedBox(width: AppStyles.paddingM),
+                Text('Historique des ventes', style: AppStyles.heading2),
+                const Spacer(),
+                IconButton(
+                  icon: const Icon(Icons.refresh),
+                  tooltip: 'Actualiser',
+                  onPressed: () {
+                    ref.invalidate(historiqueProvider);
+                  },
+                ),
+                IconButton(
+                  icon: const Icon(Icons.close),
+                  onPressed: () => Navigator.pop(context),
+                ),
+              ],
+            ),
+
+            const Divider(height: AppStyles.paddingL),
 
             // Filtres
             _buildFiltres(),
 
-            // Liste des ventes
+            const SizedBox(height: AppStyles.paddingM),
+
+            // Liste
             Expanded(
-              child:
-                  _isLoading
-                      ? const Center(child: CircularProgressIndicator())
-                      : _ventes.isEmpty
-                      ? _buildEmptyState()
-                      : _buildListeVentes(),
+              child: ventesAsync.when(
+                data: (ventes) {
+                  if (ventes.isEmpty) {
+                    return _buildVide();
+                  }
+
+                  return _buildListe(ventes);
+                },
+                loading: () => const Center(child: CircularProgressIndicator()),
+                error:
+                    (error, stack) => Center(
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          const Icon(
+                            Icons.error,
+                            color: AppColors.error,
+                            size: 48,
+                          ),
+                          const SizedBox(height: AppStyles.paddingM),
+                          Text(
+                            'Erreur: $error',
+                            style: const TextStyle(color: AppColors.error),
+                          ),
+                        ],
+                      ),
+                    ),
+              ),
             ),
 
-            // Footer avec stats
-            _buildFooter(),
+            // Footer - Statistiques
+            _buildFooterStats(ventesAsync.value ?? []),
           ],
         ),
       ),
     );
   }
 
-  Widget _buildHeader() {
-    return Container(
-      padding: const EdgeInsets.all(AppStyles.paddingL),
-      decoration: BoxDecoration(
-        color: AppColors.primary,
-        borderRadius: const BorderRadius.only(
-          topLeft: Radius.circular(AppStyles.radiusM),
-          topRight: Radius.circular(AppStyles.radiusM),
+  Widget _buildFiltres() {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(AppStyles.paddingM),
+        child: Row(
+          children: [
+            // Filtre date début
+            Expanded(
+              child: InkWell(
+                onTap: () => _selectionnerDate(true),
+                child: InputDecorator(
+                  decoration: const InputDecoration(
+                    labelText: 'Date début',
+                    border: OutlineInputBorder(),
+                    prefixIcon: Icon(Icons.calendar_today),
+                  ),
+                  child: Text(
+                    _dateDebut != null
+                        ? Formatters.formatDate(_dateDebut!)
+                        : 'Sélectionner',
+                    style: AppStyles.bodyMedium,
+                  ),
+                ),
+              ),
+            ),
+
+            const SizedBox(width: AppStyles.paddingM),
+
+            // Filtre date fin
+            Expanded(
+              child: InkWell(
+                onTap: () => _selectionnerDate(false),
+                child: InputDecorator(
+                  decoration: const InputDecoration(
+                    labelText: 'Date fin',
+                    border: OutlineInputBorder(),
+                    prefixIcon: Icon(Icons.calendar_today),
+                  ),
+                  child: Text(
+                    _dateFin != null
+                        ? Formatters.formatDate(_dateFin!)
+                        : 'Sélectionner',
+                    style: AppStyles.bodyMedium,
+                  ),
+                ),
+              ),
+            ),
+
+            const SizedBox(width: AppStyles.paddingM),
+
+            // Filtre statut
+            Expanded(
+              child: DropdownButtonFormField<String>(
+                value: _statutFiltre,
+                decoration: const InputDecoration(
+                  labelText: 'Statut',
+                  border: OutlineInputBorder(),
+                  prefixIcon: Icon(Icons.filter_list),
+                ),
+                items: const [
+                  DropdownMenuItem(value: 'tous', child: Text('Tous')),
+                  DropdownMenuItem(value: 'terminee', child: Text('Terminées')),
+                  DropdownMenuItem(
+                    value: 'en_attente',
+                    child: Text('En attente'),
+                  ),
+                  DropdownMenuItem(value: 'annulee', child: Text('Annulées')),
+                ],
+                onChanged: (value) {
+                  if (value != null) {
+                    setState(() {
+                      _statutFiltre = value;
+                    });
+                  }
+                },
+              ),
+            ),
+          ],
         ),
       ),
-      child: Row(
-        children: [
-          const Icon(Icons.history, color: AppColors.textLight, size: 32),
-          const SizedBox(width: AppStyles.paddingM),
-          Expanded(
-            child: Text(
-              'Historique des ventes',
-              style: AppStyles.heading2.copyWith(color: AppColors.textLight),
-            ),
-          ),
-          IconButton(
-            icon: const Icon(Icons.close, color: AppColors.textLight),
-            onPressed: () => Navigator.of(context).pop(),
-          ),
-        ],
-      ),
     );
   }
 
-  Widget _buildFiltres() {
-    return Container(
-      padding: const EdgeInsets.all(AppStyles.paddingM),
-      decoration: BoxDecoration(
-        color: AppColors.background,
-        border: Border(bottom: BorderSide(color: AppColors.border)),
-      ),
-      child: Row(
-        children: [
-          // Bouton période
-          OutlinedButton.icon(
-            onPressed: _selectionnerPeriode,
-            icon: const Icon(Icons.calendar_today, size: 16),
-            label: Text(
-              _dateDebut != null && _dateFin != null
-                  ? '${_formatDate(_dateDebut!)} - ${_formatDate(_dateFin!)}'
-                  : 'Toutes les ventes',
-              style: const TextStyle(fontSize: 12),
-            ),
-          ),
-
-          const SizedBox(width: AppStyles.paddingM),
-
-          // Filtre statut
-          DropdownButton<String>(
-            value: _filtreStatut,
-            items: const [
-              DropdownMenuItem(value: 'tous', child: Text('Toutes')),
-              DropdownMenuItem(value: 'terminee', child: Text('Terminées')),
-              DropdownMenuItem(value: 'en_attente', child: Text('En attente')),
-              DropdownMenuItem(value: 'annulee', child: Text('Annulées')),
-            ],
-            onChanged: (value) {
-              if (value != null) {
-                setState(() => _filtreStatut = value);
-                _chargerVentes();
-              }
-            },
-          ),
-
-          const Spacer(),
-
-          // Nombre de résultats
-          Text(
-            '${_ventes.length} vente(s)',
-            style: AppStyles.bodyMedium.copyWith(
-              color: AppColors.textSecondary,
-            ),
-          ),
-        ],
-      ),
+  Future<void> _selectionnerDate(bool isDebut) async {
+    final date = await showDatePicker(
+      context: context,
+      initialDate:
+          isDebut
+              ? (_dateDebut ?? DateTime.now())
+              : (_dateFin ?? DateTime.now()),
+      firstDate: DateTime(2020),
+      lastDate: DateTime.now(),
+      locale: const Locale('fr', 'FR'),
     );
+
+    if (date != null) {
+      setState(() {
+        if (isDebut) {
+          _dateDebut = date;
+        } else {
+          _dateFin = date;
+        }
+      });
+    }
   }
 
-  Widget _buildEmptyState() {
+  Widget _buildVide() {
     return Center(
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
           Icon(
             Icons.receipt_long_outlined,
-            size: 80,
+            size: 64,
             color: AppColors.textSecondary.withOpacity(0.3),
           ),
-          const SizedBox(height: AppStyles.paddingL),
+          const SizedBox(height: AppStyles.paddingM),
           Text(
             'Aucune vente trouvée',
-            style: AppStyles.heading3.copyWith(color: AppColors.textSecondary),
+            style: AppStyles.bodyLarge.copyWith(color: AppColors.textSecondary),
           ),
         ],
       ),
     );
   }
 
-  Widget _buildListeVentes() {
-    return ListView.separated(
-      padding: const EdgeInsets.all(AppStyles.paddingM),
-      itemCount: _ventes.length,
-      separatorBuilder: (context, index) => const Divider(),
+  Widget _buildListe(List<Vente> ventes) {
+    return ListView.builder(
+      itemCount: ventes.length,
       itemBuilder: (context, index) {
-        final vente = _ventes[index];
+        final vente = ventes[index];
         return _buildVenteCard(vente);
       },
     );
   }
 
   Widget _buildVenteCard(Vente vente) {
-    final Color statutColor =
-        vente.statut == 'terminee'
-            ? AppColors.success
-            : vente.statut == 'annulee'
-            ? AppColors.error
-            : AppColors.warning;
+    Color statutColor;
+    IconData statutIcon;
+    String statutLabel;
+
+    switch (vente.statut) {
+      case 'terminee':
+        statutColor = AppColors.success;
+        statutIcon = Icons.check_circle;
+        statutLabel = 'Terminée';
+        break;
+      case 'en_attente':
+        statutColor = AppColors.warning;
+        statutIcon = Icons.pending;
+        statutLabel = 'En attente';
+        break;
+      case 'annulee':
+        statutColor = AppColors.error;
+        statutIcon = Icons.cancel;
+        statutLabel = 'Annulée';
+        break;
+      default:
+        statutColor = AppColors.textSecondary;
+        statutIcon = Icons.help;
+        statutLabel = vente.statut;
+    }
 
     return Card(
-      child: ExpansionTile(
-        leading: Container(
-          width: 50,
-          height: 50,
-          decoration: BoxDecoration(
-            color: statutColor.withOpacity(0.1),
-            borderRadius: BorderRadius.circular(AppStyles.radiusM),
-          ),
-          child: Icon(
-            vente.estFacture ? Icons.receipt_long : Icons.receipt,
-            color: statutColor,
-          ),
+      margin: const EdgeInsets.only(bottom: AppStyles.paddingS),
+      child: ListTile(
+        leading: CircleAvatar(
+          backgroundColor: statutColor.withOpacity(0.2),
+          child: Icon(statutIcon, color: statutColor),
         ),
         title: Row(
           children: [
@@ -387,16 +294,13 @@ class _HistoriqueVentesDialogState extends State<HistoriqueVentesDialog> {
             ),
             const SizedBox(width: AppStyles.paddingS),
             Container(
-              padding: const EdgeInsets.symmetric(
-                horizontal: AppStyles.paddingS,
-                vertical: 2,
-              ),
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
               decoration: BoxDecoration(
                 color: statutColor.withOpacity(0.2),
                 borderRadius: BorderRadius.circular(AppStyles.radiusS),
               ),
               child: Text(
-                vente.statut.toUpperCase(),
+                statutLabel,
                 style: AppStyles.labelSmall.copyWith(
                   color: statutColor,
                   fontWeight: FontWeight.bold,
@@ -408,276 +312,94 @@ class _HistoriqueVentesDialogState extends State<HistoriqueVentesDialog> {
         subtitle: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(_formatDate(vente.dateVente)),
-            const SizedBox(height: 4),
-            Text(
-              '${vente.lignes.length} article(s) • ${Formatters.formatDevise(vente.montantTTC)}',
-              style: AppStyles.bodyMedium.copyWith(
-                color: AppColors.textSecondary,
-              ),
-            ),
+            Text(Formatters.formatDateTime(vente.dateVente)),
+            Text('${vente.lignes.length} article(s) • ${vente.modePaiement}'),
           ],
         ),
         trailing: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            // Bouton imprimer
-            IconButton(
-              icon: const Icon(Icons.print),
-              tooltip: 'Réimprimer',
-              onPressed: () => _reimprimer(vente),
+            Text(
+              Formatters.formatDevise(vente.montantTTC),
+              style: AppStyles.prixLarge,
             ),
-
-            // Bouton annuler (seulement pour les ventes terminées)
-            if (vente.statut == 'terminee')
-              IconButton(
-                icon: const Icon(Icons.cancel_outlined),
-                tooltip: 'Annuler',
-                color: AppColors.error,
-                onPressed: () => _annulerVente(vente),
-              ),
+            const SizedBox(width: AppStyles.paddingM),
+            IconButton(
+              icon: const Icon(Icons.visibility),
+              tooltip: 'Voir détail',
+              onPressed: () => _voirDetail(vente),
+            ),
           ],
         ),
-        children: [
-          Padding(
-            padding: const EdgeInsets.all(AppStyles.paddingM),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                // Détails de paiement
-                _buildDetailRow(
-                  'Mode de paiement',
-                  _getModePaiementLabel(vente.modePaiement),
-                ),
-                _buildDetailRow(
-                  'Montant payé',
-                  Formatters.formatDevise(vente.montantPaye),
-                ),
-                if (vente.montantRendu > 0)
-                  _buildDetailRow(
-                    'Rendu',
-                    Formatters.formatDevise(vente.montantRendu),
-                  ),
-
-                const Divider(height: AppStyles.paddingL),
-
-                // Articles
-                Text(
-                  'Articles',
-                  style: AppStyles.labelLarge.copyWith(
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-                const SizedBox(height: AppStyles.paddingS),
-                ...vente.lignes.map((ligne) {
-                  return Padding(
-                    padding: const EdgeInsets.only(bottom: AppStyles.paddingS),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Expanded(
-                          child: Text(
-                            '${ligne.quantite.toInt()}x ${ligne.nomProduit}',
-                            style: AppStyles.bodyMedium,
-                          ),
-                        ),
-                        Text(
-                          Formatters.formatDevise(ligne.totalTTC),
-                          style: AppStyles.labelMedium.copyWith(
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                      ],
-                    ),
-                  );
-                }),
-              ],
-            ),
-          ),
-        ],
       ),
     );
   }
 
-  Widget _buildDetailRow(String label, String value) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: AppStyles.paddingS),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Text(label, style: AppStyles.bodyMedium),
-          Text(
-            value,
-            style: AppStyles.labelMedium.copyWith(fontWeight: FontWeight.bold),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildFooter() {
-    final totalVentes = _ventes.fold<double>(
+  Widget _buildFooterStats(List<Vente> ventes) {
+    final ventesTerminees =
+        ventes.where((v) => v.statut == 'terminee').toList();
+    final totalCA = ventesTerminees.fold<double>(
       0,
-      (sum, vente) => sum + (vente.statut == 'terminee' ? vente.montantTTC : 0),
+      (sum, v) => sum + v.montantTTC,
     );
 
     return Container(
-      padding: const EdgeInsets.all(AppStyles.paddingL),
+      padding: const EdgeInsets.all(AppStyles.paddingM),
       decoration: BoxDecoration(
-        color: AppColors.background,
-        border: Border(top: BorderSide(color: AppColors.border)),
+        color: AppColors.primary.withOpacity(0.1),
+        borderRadius: BorderRadius.circular(AppStyles.radiusM),
       ),
       child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        mainAxisAlignment: MainAxisAlignment.spaceAround,
         children: [
-          Text('Total des ventes terminées', style: AppStyles.heading4),
-          Text(
-            Formatters.formatDevise(totalVentes),
-            style: AppStyles.prixLarge,
+          _buildStatItem(
+            'Total ventes',
+            '${ventes.length}',
+            Icons.receipt_long,
+          ),
+          _buildStatItem(
+            'Terminées',
+            '${ventesTerminees.length}',
+            Icons.check_circle,
+          ),
+          _buildStatItem(
+            'Chiffre d\'affaires',
+            Formatters.formatDevise(totalCA),
+            Icons.attach_money,
+          ),
+          _buildStatItem(
+            'Panier moyen',
+            ventesTerminees.isEmpty
+                ? '0,00 DA'
+                : Formatters.formatDevise(totalCA / ventesTerminees.length),
+            Icons.shopping_basket,
           ),
         ],
       ),
     );
   }
 
-  String _getModePaiementLabel(String mode) {
-    switch (mode) {
-      case 'especes':
-        return 'Espèces';
-      case 'carte':
-        return 'Carte bancaire';
-      case 'cheque':
-        return 'Chèque';
-      case 'mixte':
-        return 'Paiement mixte';
-      default:
-        return mode;
-    }
-  }
-}
-
-/// Dialog de sélection de période
-class _PeriodeDialog extends StatefulWidget {
-  final DateTime? dateDebut;
-  final DateTime? dateFin;
-
-  const _PeriodeDialog({this.dateDebut, this.dateFin});
-
-  @override
-  State<_PeriodeDialog> createState() => _PeriodeDialogState();
-}
-
-class _PeriodeDialogState extends State<_PeriodeDialog> {
-  DateTime? _dateDebut;
-  DateTime? _dateFin;
-
-  @override
-  void initState() {
-    super.initState();
-    _dateDebut = widget.dateDebut;
-    _dateFin = widget.dateFin;
-  }
-
-  String _formatDate(DateTime? date) {
-    if (date == null) return 'Non définie';
-    return '${date.day}/${date.month}/${date.year}';
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return AlertDialog(
-      title: const Text('Sélectionner une période'),
-      content: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          // Boutons période rapide
-          Wrap(
-            spacing: AppStyles.paddingS,
-            children: [
-              OutlinedButton(
-                onPressed: () {
-                  final now = DateTime.now();
-                  setState(() {
-                    _dateDebut = now.copyWith(hour: 0, minute: 0);
-                    _dateFin = now.copyWith(hour: 23, minute: 59);
-                  });
-                },
-                child: const Text('Aujourd\'hui'),
-              ),
-              OutlinedButton(
-                onPressed: () {
-                  final now = DateTime.now();
-                  setState(() {
-                    _dateDebut = now.subtract(const Duration(days: 7));
-                    _dateFin = now;
-                  });
-                },
-                child: const Text('7 derniers jours'),
-              ),
-              OutlinedButton(
-                onPressed: () {
-                  final now = DateTime.now();
-                  setState(() {
-                    _dateDebut = DateTime(now.year, now.month, 1);
-                    _dateFin = now;
-                  });
-                },
-                child: const Text('Ce mois'),
-              ),
-            ],
-          ),
-
-          const SizedBox(height: AppStyles.paddingL),
-
-          // Date début
-          ListTile(
-            title: const Text('Date début'),
-            subtitle: Text(_formatDate(_dateDebut)),
-            trailing: const Icon(Icons.calendar_today),
-            onTap: () async {
-              final date = await showDatePicker(
-                context: context,
-                initialDate: _dateDebut ?? DateTime.now(),
-                firstDate: DateTime(2020),
-                lastDate: DateTime.now(),
-              );
-              if (date != null) {
-                setState(() => _dateDebut = date);
-              }
-            },
-          ),
-
-          // Date fin
-          ListTile(
-            title: const Text('Date fin'),
-            subtitle: Text(_formatDate(_dateFin)),
-            trailing: const Icon(Icons.calendar_today),
-            onTap: () async {
-              final date = await showDatePicker(
-                context: context,
-                initialDate: _dateFin ?? DateTime.now(),
-                firstDate: DateTime(2020),
-                lastDate: DateTime.now(),
-              );
-              if (date != null) {
-                setState(() => _dateFin = date);
-              }
-            },
-          ),
-        ],
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(context),
-          child: const Text('Annuler'),
+  Widget _buildStatItem(String label, String value, IconData icon) {
+    return Column(
+      children: [
+        Icon(icon, color: AppColors.primary),
+        const SizedBox(height: 4),
+        Text(
+          value,
+          style: AppStyles.labelLarge.copyWith(fontWeight: FontWeight.bold),
         ),
-        ElevatedButton(
-          onPressed: () {
-            Navigator.pop(context, {'debut': _dateDebut, 'fin': _dateFin});
-          },
-          child: const Text('Valider'),
+        Text(
+          label,
+          style: AppStyles.labelSmall.copyWith(color: AppColors.textSecondary),
         ),
       ],
+    );
+  }
+
+  void _voirDetail(Vente vente) {
+    showDialog(
+      context: context,
+      builder: (context) => DetailVenteDialog(venteId: vente.id!),
     );
   }
 }

@@ -16,6 +16,20 @@ class PrintService {
     return '${date.day.toString().padLeft(2, '0')}/${date.month.toString().padLeft(2, '0')}/${date.year} ${date.hour.toString().padLeft(2, '0')}:${date.minute.toString().padLeft(2, '0')}';
   }
 
+  // ==================== MÉTHODES PUBLIQUES (AJOUTÉES) ====================
+
+  /// Générer le PDF du ticket (sans imprimer) - POUR RIVERPOD
+  Future<pw.Document> genererTicketPDF(Vente vente) async {
+    return await _genererTicketPDF(vente);
+  }
+
+  /// Générer le PDF de la facture (sans imprimer) - POUR RIVERPOD
+  Future<pw.Document> genererFacturePDF(Vente vente) async {
+    return await _genererFacturePDF(vente);
+  }
+
+  // ==================== MÉTHODES D'IMPRESSION DIRECTE ====================
+
   /// Imprimer un ticket de vente
   Future<bool> imprimerTicket(Vente vente) async {
     try {
@@ -53,6 +67,8 @@ class PrintService {
       throw PrintException('Erreur lors de l\'impression: $e');
     }
   }
+
+  // ==================== GÉNÉRATION PDF PRIVÉE ====================
 
   /// Générer le PDF d'un ticket (80mm)
   Future<pw.Document> _genererTicketPDF(Vente vente) async {
@@ -92,10 +108,7 @@ class PrintService {
 
               // Informations du ticket
               _buildInfoRow('N° Ticket:', vente.numeroFacture),
-              _buildInfoRow(
-                'Date:',
-                _formatDatePDF(vente.dateVente),
-              ), // ← MODIFIÉ
+              _buildInfoRow('Date:', _formatDatePDF(vente.dateVente)),
               if (vente.clientId != null)
                 _buildInfoRow('Client:', 'ID ${vente.clientId}'),
 
@@ -277,9 +290,7 @@ class PrintService {
                       ),
                       pw.SizedBox(height: 8),
                       pw.Text('N°: ${vente.numeroFacture}'),
-                      pw.Text(
-                        'Date: ${_formatDatePDF(vente.dateVente)}',
-                      ), // ← MODIFIÉ
+                      pw.Text('Date: ${_formatDatePDF(vente.dateVente)}'),
                     ],
                   ),
                 ],
@@ -302,7 +313,7 @@ class PrintService {
                 child: pw.Column(
                   crossAxisAlignment: pw.CrossAxisAlignment.start,
                   children: [
-                    pw.Text('Client ID: ${vente.clientId}'),
+                    pw.Text('Client ID: ${vente.clientId ?? "Non spécifié"}'),
                     // TODO: Ajouter les détails du client quand module disponible
                   ],
                 ),
@@ -392,6 +403,8 @@ class PrintService {
 
     return pdf;
   }
+
+  // ==================== WIDGETS HELPERS ====================
 
   /// Widget helper - Info row pour ticket
   pw.Widget _buildInfoRow(String label, String value) {

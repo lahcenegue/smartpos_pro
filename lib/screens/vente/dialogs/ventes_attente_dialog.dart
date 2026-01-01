@@ -1,181 +1,103 @@
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/constants/app_colors.dart';
 import '../../../core/constants/app_styles.dart';
 import '../../../core/utils/formatters.dart';
-import '../../../providers/vente_provider.dart';
-import '../../../repositories/vente_repository.dart';
+import '../../../providers/vente/vente_providers.dart';
 import '../../../models/vente.dart';
 
-/// Dialog pour afficher et gérer les ventes en attente
-class VentesAttenteDialog extends StatefulWidget {
-  const VentesAttenteDialog({super.key});
+class VentesAttenteDialog extends ConsumerWidget {
+  const VentesAttenteDialog({Key? key}) : super(key: key);
 
   @override
-  State<VentesAttenteDialog> createState() => _VentesAttenteDialogState();
-}
+  Widget build(BuildContext context, WidgetRef ref) {
+    final ventesAsync = ref.watch(ventesEnAttenteProvider);
 
-class _VentesAttenteDialogState extends State<VentesAttenteDialog> {
-  final VenteRepository _venteRepo = VenteRepository();
-  List<Vente> _ventesEnAttente = [];
-  bool _isLoading = true;
-
-  @override
-  void initState() {
-    super.initState();
-    _chargerVentesEnAttente();
-  }
-
-  // ← AJOUTER cette méthode
-  /// Formater une date simplement (sans dépendance locale)
-  String _formatDate(DateTime date) {
-    return '${date.day.toString().padLeft(2, '0')}/${date.month.toString().padLeft(2, '0')}/${date.year} ${date.hour.toString().padLeft(2, '0')}:${date.minute.toString().padLeft(2, '0')}';
-  }
-
-  Future<void> _chargerVentesEnAttente() async {
-    setState(() => _isLoading = true);
-
-    try {
-      final ventes = await _venteRepo.getVentesEnAttente();
-
-      if (mounted) {
-        setState(() {
-          _ventesEnAttente = ventes;
-          _isLoading = false;
-        });
-      }
-    } catch (e) {
-      if (mounted) {
-        setState(() => _isLoading = false);
-        _showError('Erreur lors du chargement: $e');
-      }
-    }
-  }
-
-  Future<void> _chargerVente(Vente vente) async {
-    try {
-      final venteProvider = context.read<VenteProvider>();
-      await venteProvider.chargerVenteEnAttente(vente);
-
-      if (mounted) {
-        Navigator.of(context).pop();
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Vente ${vente.numeroFacture} chargée'),
-            backgroundColor: AppColors.success,
-          ),
-        );
-      }
-    } catch (e) {
-      if (mounted) {
-        _showError('Erreur lors du chargement: $e');
-      }
-    }
-  }
-
-  Future<void> _supprimerVente(Vente vente) async {
-    // Demander confirmation
-    final confirme = await showDialog<bool>(
-      context: context,
-      builder:
-          (context) => AlertDialog(
-            title: const Text('Supprimer la vente'),
-            content: Text(
-              'Voulez-vous vraiment supprimer la vente ${vente.numeroFacture} ?',
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(context, false),
-                child: const Text('Annuler'),
-              ),
-              ElevatedButton(
-                onPressed: () => Navigator.pop(context, true),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppColors.error,
-                ),
-                child: const Text('Supprimer'),
-              ),
-            ],
-          ),
-    );
-
-    if (confirme == true) {
-      try {
-        await _venteRepo.supprimerVente(vente.id!);
-        _chargerVentesEnAttente();
-
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('Vente ${vente.numeroFacture} supprimée'),
-              backgroundColor: AppColors.success,
-            ),
-          );
-        }
-      } catch (e) {
-        if (mounted) {
-          _showError('Erreur lors de la suppression: $e');
-        }
-      }
-    }
-  }
-
-  void _showError(String message) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message), backgroundColor: AppColors.error),
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) {
     return Dialog(
-      child: SizedBox(
-        width: 700,
+      child: Container(
+        width: 800,
         height: 600,
+        padding: const EdgeInsets.all(AppStyles.paddingL),
         child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             // Header
-            Container(
-              padding: const EdgeInsets.all(AppStyles.paddingL),
-              decoration: BoxDecoration(
-                color: AppColors.warning,
-                borderRadius: const BorderRadius.only(
-                  topLeft: Radius.circular(AppStyles.radiusM),
-                  topRight: Radius.circular(AppStyles.radiusM),
+            Row(
+              children: [
+                const Icon(Icons.pending_actions, color: AppColors.primary),
+                const SizedBox(width: AppStyles.paddingM),
+                Text('Ventes en attente', style: AppStyles.heading2),
+                const Spacer(),
+                IconButton(
+                  icon: const Icon(Icons.refresh),
+                  tooltip: 'Actualiser',
+                  onPressed: () {
+                    ref.invalidate(ventesEnAttenteProvider);
+                  },
                 ),
-              ),
-              child: Row(
-                children: [
-                  const Icon(
-                    Icons.pending_actions,
-                    color: AppColors.textLight,
-                    size: 32,
-                  ),
-                  const SizedBox(width: AppStyles.paddingM),
-                  Expanded(
-                    child: Text(
-                      'Ventes en attente (${_ventesEnAttente.length})',
-                      style: AppStyles.heading2.copyWith(
-                        color: AppColors.textLight,
-                      ),
-                    ),
-                  ),
-                  IconButton(
-                    icon: const Icon(Icons.close, color: AppColors.textLight),
-                    onPressed: () => Navigator.of(context).pop(),
-                  ),
-                ],
-              ),
+                IconButton(
+                  icon: const Icon(Icons.close),
+                  onPressed: () => Navigator.pop(context),
+                ),
+              ],
             ),
 
-            // Body
+            const Divider(height: AppStyles.paddingL),
+
+            // Liste
             Expanded(
-              child:
-                  _isLoading
-                      ? const Center(child: CircularProgressIndicator())
-                      : _ventesEnAttente.isEmpty
-                      ? _buildEmptyState()
-                      : _buildListeVentes(),
+              child: ventesAsync.when(
+                data: (ventes) {
+                  if (ventes.isEmpty) {
+                    return Center(
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(
+                            Icons.pending_actions_outlined,
+                            size: 64,
+                            color: AppColors.textSecondary.withOpacity(0.3),
+                          ),
+                          const SizedBox(height: AppStyles.paddingM),
+                          Text(
+                            'Aucune vente en attente',
+                            style: AppStyles.bodyLarge.copyWith(
+                              color: AppColors.textSecondary,
+                            ),
+                          ),
+                        ],
+                      ),
+                    );
+                  }
+
+                  return ListView.builder(
+                    itemCount: ventes.length,
+                    itemBuilder: (context, index) {
+                      final vente = ventes[index];
+                      return _buildVenteCard(context, ref, vente);
+                    },
+                  );
+                },
+                loading: () => const Center(child: CircularProgressIndicator()),
+                error:
+                    (error, stack) => Center(
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          const Icon(
+                            Icons.error,
+                            color: AppColors.error,
+                            size: 48,
+                          ),
+                          const SizedBox(height: AppStyles.paddingM),
+                          Text(
+                            'Erreur: $error',
+                            style: const TextStyle(color: AppColors.error),
+                          ),
+                        ],
+                      ),
+                    ),
+              ),
             ),
           ],
         ),
@@ -183,142 +105,162 @@ class _VentesAttenteDialogState extends State<VentesAttenteDialog> {
     );
   }
 
-  Widget _buildEmptyState() {
-    return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(
-            Icons.inbox_outlined,
-            size: 80,
-            color: AppColors.textSecondary.withOpacity(0.3),
-          ),
-          const SizedBox(height: AppStyles.paddingL),
-          Text(
-            'Aucune vente en attente',
-            style: AppStyles.heading3.copyWith(color: AppColors.textSecondary),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildListeVentes() {
-    return ListView.separated(
-      padding: const EdgeInsets.all(AppStyles.paddingL),
-      itemCount: _ventesEnAttente.length,
-      separatorBuilder: (context, index) => const Divider(),
-      itemBuilder: (context, index) {
-        final vente = _ventesEnAttente[index];
-        return _buildVenteCard(vente);
-      },
-    );
-  }
-
-  Widget _buildVenteCard(Vente vente) {
+  Widget _buildVenteCard(BuildContext context, WidgetRef ref, Vente vente) {
     return Card(
-      child: InkWell(
-        onTap: () => _chargerVente(vente),
-        borderRadius: BorderRadius.circular(AppStyles.radiusM),
-        child: Padding(
-          padding: const EdgeInsets.all(AppStyles.paddingM),
-          child: Row(
-            children: [
-              // Icône
-              Container(
-                width: 50,
-                height: 50,
-                decoration: BoxDecoration(
-                  color: AppColors.warning.withOpacity(0.1),
-                  borderRadius: BorderRadius.circular(AppStyles.radiusM),
-                ),
-                child: const Icon(
-                  Icons.shopping_cart,
-                  color: AppColors.warning,
-                ),
-              ),
-
-              const SizedBox(width: AppStyles.paddingM),
-
-              // Informations
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        Text(
-                          vente.numeroFacture,
-                          style: AppStyles.labelLarge.copyWith(
-                            fontWeight: FontWeight.bold,
-                          ),
+      margin: const EdgeInsets.only(bottom: AppStyles.paddingM),
+      child: Padding(
+        padding: const EdgeInsets.all(AppStyles.paddingM),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const CircleAvatar(child: Icon(Icons.shopping_cart)),
+                const SizedBox(width: AppStyles.paddingM),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Vente #${vente.id}',
+                        style: AppStyles.labelLarge.copyWith(
+                          fontWeight: FontWeight.bold,
                         ),
-                        const SizedBox(width: AppStyles.paddingS),
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: AppStyles.paddingS,
-                            vertical: 2,
-                          ),
-                          decoration: BoxDecoration(
-                            color: AppColors.warning.withOpacity(0.2),
-                            borderRadius: BorderRadius.circular(
-                              AppStyles.radiusS,
-                            ),
-                          ),
-                          child: Text(
-                            'EN ATTENTE',
-                            style: AppStyles.labelSmall.copyWith(
-                              color: AppColors.warning,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: AppStyles.paddingXS),
-                    Text(
-                      '${vente.lignes.length} article(s) • ${Formatters.formatDevise(vente.montantTTC)}',
-                      style: AppStyles.bodyMedium.copyWith(
-                        color: AppColors.textSecondary,
                       ),
-                    ),
-                    const SizedBox(height: AppStyles.paddingXS),
+                      Text(
+                        Formatters.formatDateTime(vente.dateVente),
+                        style: AppStyles.labelSmall.copyWith(
+                          color: AppColors.textSecondary,
+                        ),
+                      ),
+                      if (vente.notes != null && vente.notes!.isNotEmpty)
+                        Text(
+                          vente.notes!,
+                          style: AppStyles.labelSmall.copyWith(
+                            fontStyle: FontStyle.italic,
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
                     Text(
-                      _formatDate(
-                        vente.dateVente,
-                      ), // ← UTILISER _formatDate au lieu de Formatters.formatDateTime
+                      Formatters.formatDevise(vente.montantTTC),
+                      style: AppStyles.prixLarge,
+                    ),
+                    Text(
+                      '${vente.lignes.length} article(s)',
                       style: AppStyles.labelSmall.copyWith(
                         color: AppColors.textSecondary,
                       ),
                     ),
                   ],
                 ),
+              ],
+            ),
+            const SizedBox(height: AppStyles.paddingM),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: [
+                TextButton.icon(
+                  onPressed: () => _supprimerVente(context, ref, vente),
+                  icon: const Icon(Icons.delete_outline),
+                  label: const Text('Supprimer'),
+                  style: TextButton.styleFrom(foregroundColor: AppColors.error),
+                ),
+                const SizedBox(width: AppStyles.paddingS),
+                ElevatedButton.icon(
+                  onPressed: () => _chargerVente(context, ref, vente),
+                  icon: const Icon(Icons.shopping_cart),
+                  label: const Text('Charger'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.primary,
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _chargerVente(BuildContext context, WidgetRef ref, Vente vente) async {
+    try {
+      await ref.read(venteAttenteProvider.notifier).charger(vente);
+
+      if (context.mounted) {
+        Navigator.pop(context);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Vente chargée dans le panier'),
+            backgroundColor: AppColors.success,
+          ),
+        );
+      }
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Erreur: $e'),
+            backgroundColor: AppColors.error,
+          ),
+        );
+      }
+    }
+  }
+
+  void _supprimerVente(BuildContext context, WidgetRef ref, Vente vente) {
+    showDialog(
+      context: context,
+      builder:
+          (context) => AlertDialog(
+            title: const Text('Supprimer la vente en attente'),
+            content: const Text(
+              'Êtes-vous sûr de vouloir supprimer cette vente en attente ?',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('Annuler'),
               ),
+              ElevatedButton(
+                onPressed: () async {
+                  try {
+                    await ref
+                        .read(venteAttenteProvider.notifier)
+                        .supprimer(vente.id!);
 
-              // Boutons d'action
-              Row(
-                children: [
-                  // Charger
-                  IconButton(
-                    icon: const Icon(Icons.restore),
-                    tooltip: 'Charger',
-                    color: AppColors.success,
-                    onPressed: () => _chargerVente(vente),
-                  ),
-
-                  // Supprimer
-                  IconButton(
-                    icon: const Icon(Icons.delete_outline),
-                    tooltip: 'Supprimer',
-                    color: AppColors.error,
-                    onPressed: () => _supprimerVente(vente),
-                  ),
-                ],
+                    if (context.mounted) {
+                      Navigator.pop(context);
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text('Vente supprimée'),
+                          backgroundColor: AppColors.success,
+                        ),
+                      );
+                    }
+                  } catch (e) {
+                    if (context.mounted) {
+                      Navigator.pop(context);
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: Text('Erreur: $e'),
+                          backgroundColor: AppColors.error,
+                        ),
+                      );
+                    }
+                  }
+                },
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.error,
+                ),
+                child: const Text('Supprimer'),
               ),
             ],
           ),
-        ),
-      ),
     );
   }
 }
